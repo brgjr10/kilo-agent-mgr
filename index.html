@@ -144,21 +144,17 @@
       font-size: 11px;
     }
 
-    /* Logo mark — the wordmark sits on a light chip so the dark ink reads
-       against the dark header; the chip is the darkest "light" GitHub uses. */
+    /* Logo — transparent outline variant, no chip. */
     .logo-chip {
       display: inline-flex;
       align-items: center;
       height: 22px;
-      padding: 0 8px;
-      background: #f6f8fa;
-      border-radius: 4px;
       margin-right: 8px;
       flex-shrink: 0;
     }
 
     .header-logo {
-      height: 14px;
+      height: 20px;
       display: block;
     }
 
@@ -948,8 +944,11 @@ th {
 
 <body>
   <header>
-    <h1><span class="logo-chip"><img class="header-logo" src="assets/logo-wordmark.png" alt="Kilo Code" height="14"></span><span class="dot" id="liveDot"></span>Agent Manager</h1>
+    <h1><span class="logo-chip"><img class="header-logo" src="assets/logo-outline.png" alt="Kilo Code" height="20"></span><span class="dot" id="liveDot"></span>Agent Manager</h1>
     <span class="meta" id="meta">starting…</span>
+    <span class="meta" id="tokenTotal" title="total tokens across tracked sessions"></span>
+    <select id="headerDir" title="chat workspace directory" style="max-width:220px"></select>
+    <span class="badge" id="headerDirSource" style="margin-right:8px">—</span>
     <div class="spacer"></div>
     <input type="search" id="search" placeholder="filter sessions, agents, activity…  ( / )" autocomplete="off">
     <button id="autoBtn" aria-pressed="true" title="poll state.json every 5s">Auto 5s</button>
@@ -1352,6 +1351,12 @@ th {
           (data.sessions || []).length + ' sessions · tracked ' + details.length + ' · updated ' +
           rel(new Date(data.generatedAt || 0).getTime());
 
+        const totalTokens = details.reduce((s, d) => {
+          const t = d.tokens || {};
+          return s + (t.input || 0) + (t.output || 0) + (t.reasoning || 0);
+        }, 0);
+        $('#tokenTotal').textContent = totalTokens ? num(totalTokens) + ' tokens' : '';
+
         // ---- errors ----
         const errs = data.errors || [];
         const banner = $('#banner');
@@ -1685,17 +1690,31 @@ th {
           src.title = 'Several workspaces share that folder name:\n' + chat.workspace.ambiguous.join('\n');
         }
 
-        const sel = $('#chatDir');
-        const wanted = chat.directory || '';
         const opts = chat.dirs.slice();
+        const wanted = chat.directory || '';
         if (wanted && !opts.includes(wanted)) opts.unshift(wanted);
-        sel.replaceChildren(...opts.map((d) => {
+
+        const chatSel = $('#chatDir');
+        chatSel.replaceChildren(...opts.map((d) => {
           const o = document.createElement('option');
           o.value = d;
           o.textContent = d;
           return o;
         }));
-        sel.value = wanted;
+        chatSel.value = wanted;
+
+        const hdrSel = $('#headerDir');
+        hdrSel.replaceChildren(...opts.map((d) => {
+          const o = document.createElement('option');
+          o.value = d;
+          o.textContent = d;
+          return o;
+        }));
+        hdrSel.value = wanted;
+
+        const hdrSrc = $('#headerDirSource');
+        hdrSrc.textContent = chat.source || '—';
+        hdrSrc.className = 'badge ' + (chat.source === 'window' ? 'green' : chat.source === 'explicit' ? 'blue' : '');
       }
 
       async function loadModels() {
@@ -1941,6 +1960,11 @@ th {
       $('#chatStop').addEventListener('click', stopChat);
 
       $('#chatDir').addEventListener('change', (e) => {
+        chat.directory = e.target.value;
+        paintWorkspace();
+      });
+
+      $('#headerDir').addEventListener('change', (e) => {
         chat.directory = e.target.value;
         paintWorkspace();
       });
