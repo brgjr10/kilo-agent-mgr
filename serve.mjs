@@ -10,6 +10,8 @@
  *   /state.json                  current snapshot
  *   /api/state                   snapshot, regenerating it first
  *   /api/collect?detail=N        force a re-collect and return the new snapshot
+ *   /api/health                  snapshot/collecting/lastCollectError, so the UI can
+ *                            tell a slow first collect from a broken one
  *   /api/session/<id>            full chat transcript for one session, on demand
  *                            (?limit= entries, ?chars= max chars per entry)
  *
@@ -91,6 +93,11 @@ const TYPES = {
 };
 
 let collecting = false;
+// Kept so a failed collect can be reported rather than retried silently forever.
+// Without it a collector that dies on startup looks identical to one still
+// working: state.json simply never appears, and the dashboard can only say
+// "not there yet" however many minutes that goes on for.
+let lastCollectError = null;
 
 // Runs the collector as a child process. Must stay async: spawnSync would block
 // the event loop for the whole export pass and freeze every dashboard request.
@@ -108,7 +115,12 @@ function runCollector() {
     child.on("error", (e) => { collecting = false; done({ ok: false, error: e.message }); });
     child.on("close", (code) => {
       collecting = false;
-      done(code === 0 ? { ok: true } : { ok: false, error: err.slice(0, 800) || "collector exited " + code });
+      const result = code === 0
+        ? { ok: true }
+        : { ok: false, error: err.trim().slice(0, 800) || "collector exited " + code };
+      lastCollectError = result.ok ? null : result.error;
+      if (!result.ok) console.error("collect failed: " + lastCollectError);
+      done(result);
     });
   });
 }
@@ -133,12 +145,12 @@ async function collect(res) {
 // chain the next background run off the end of the previous one so slow
 // exports never pile up
 let timer = null;
-function scheduleLoop() {
+function scheduleLoop(delayMs = INTERVAL * 1000) {
   if (!AUTO_REFRESH) return;
   timer = setTimeout(async () => {
     await runCollector();
     scheduleLoop();
-  }, INTERVAL * 1000);
+  }, delayMs);
 }
 
 function serveFile(res, file) {
@@ -357,6 +369,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Lets the dashboard tell "the first snapshot is still being built" apart from
+  // "the collector is broken". Both look identical from state.json alone — a 404
+  // that never resolves — and confusing the two leaves the user staring at a
+  // loading message with no way to find out anything is actually wrong.
+  if (url === "/api/health") {
+    json(res, 200, {
+      ok: lastCollectError === null,
+      snapshot: fs.existsSync(STATE),
+      collecting,
+      lastCollectError,
+    });
+    return;
+  }
+
   if (url === "/api/state" || url === "/api/collect") {
     collect(res);
     return;
@@ -387,19 +413,22 @@ server.listen(PORT, HOST, () => {
   console.log("Agent Manager → " + url);
   console.log("READY " + url);
   if (WORKSPACE) console.log("chat workspace pinned to " + WORKSPACE);
-  if (!fs.existsSync(STATE)) {
+  const missing = !fs.existsSync(STATE);
+  if (missing) {
     // A first collect can take a minute and collect() is synchronous, so running
     // it inline here would leave the socket bound but unresponsive — the packaged
     // app would show a connection error instead of a loading dashboard. Hand it
     // to the refresh loop instead, and only block when nothing else will collect.
-    console.log(AUTO_REFRESH
-      ? "state.json missing — the refresh loop will collect shortly"
-      : "state.json missing — collecting now (first run can take a minute) …");
+    console.log("state.json missing — collecting now" +
+      (AUTO_REFRESH ? "" : " inline, so the server blocks until it finishes"));
     if (!AUTO_REFRESH) collect({ writeHead() {}, end() {} });
   }
   if (AUTO_REFRESH) {
     console.log("auto-refresh every " + INTERVAL + "s (next run starts after the previous one finishes)");
-    scheduleLoop();
+    // Start the first pass at once when there is nothing to show yet. Idling a
+    // whole interval with no snapshot only adds dead time to the slowest collect,
+    // which is the one the user is waiting on.
+    scheduleLoop(missing ? 0 : undefined);
   }
 });
 

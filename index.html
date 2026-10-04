@@ -249,6 +249,15 @@
       white-space: pre-wrap;
     }
 
+    /* Not everything shown in the banner is a failure. A first run has no
+       snapshot at all for a few minutes, and painting that in the error red
+       reads as a broken install. */
+    .banner.info {
+      border-color: var(--blue);
+      background: rgba(88, 166, 255, 0.1);
+      color: var(--blue);
+    }
+
     .kpis {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -1474,13 +1483,66 @@ th {
           state.data = data;
           render();
         } catch (err) {
-          const banner = $('#banner');
-          banner.textContent =
-            'Could not load state.json: ' + (err && err.message ? err.message : err) + '\n' +
-            'Start the server from this folder:  node serve.mjs   →  http://localhost:8080\n' +
-            'Then refresh this snapshot:              node collector.mjs --detail 8';
-          banner.classList.remove('hidden');
+          await showLoadFailure(err);
         }
+      }
+
+      // A missing snapshot is the normal state of a first run: the packaged app
+      // extracts its payload, then spends minutes on the first collect. Showing
+      // that as a red failure told the user to run `node collector.mjs`, a
+      // command that does not exist for someone who only double-clicked an exe.
+      //
+      // A 404 on its own cannot tell "still building" from "collector is
+      // broken" — both are a missing file that never arrives — so ask the
+      // backend which one it is rather than guessing.
+      async function showLoadFailure(err) {
+        const banner = $('#banner');
+        const message = err && err.message ? err.message : String(err);
+
+        const show = (text, info) => {
+          banner.textContent = text;
+          banner.classList.remove('hidden');
+          banner.classList.toggle('info', !!info);
+        };
+
+        if (!/HTTP 404$/.test(message)) {
+          show('Could not load state.json: ' + message, false);
+          return;
+        }
+
+        let health = null;
+        try {
+          const r = await fetch('api/health', { cache: 'no-store' });
+          if (r.ok) health = await r.json();
+        } catch (e) {
+          // Older backend without the endpoint: fall through to the neutral text.
+        }
+
+        if (health && health.collecting) {
+          // Checked before lastCollectError on purpose: a retry is running right
+          // now, so any earlier failure is already being dealt with. Reporting it
+          // as current turns every retry into a fresh red banner.
+          show(
+            'Building the first snapshot… the first pass reads every session and can take a few minutes. It refreshes on its own — nothing to do.',
+            true
+          );
+          return;
+        }
+
+        if (health && health.lastCollectError) {
+          show(
+            'The collector failed, so there is no snapshot to show:\n  ' +
+              String(health.lastCollectError).slice(0, 600) +
+              '\n\nThe same error is in backend.log beside the app.',
+            false
+          );
+          return;
+        }
+
+        show(
+          'No snapshot yet. The backend keeps retrying on its own; nothing to do.',
+          true
+        );
       }
 
       // ---- controls ----

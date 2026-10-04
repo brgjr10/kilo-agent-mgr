@@ -84,7 +84,7 @@ no archive dependency.
 **Where does the exe go?** Anywhere writable — there is nothing to install beside
 it. `node.exe` is inside the payload, not looked up on `PATH`. The one requirement
 is that the folder you drop it in is writable, because first launch expands the
-payload into `%LOCALAPPDATA%\com.brodie.agentmanager\app\`.
+payload into `%APPDATA%\com.brodie.agentmanager\app\`.
 
 > A bare ~3 MB `AgentManager.exe` is the unappended shell, not the real app. The
 > shipped one is ~100 MB, dominated by `node.exe`. If it is small, you have the
@@ -99,7 +99,7 @@ payload into `%LOCALAPPDATA%\com.brodie.agentmanager\app\`.
 | `state.json` | **not bundled** — machine-specific and gitignored; the first collect creates it |
 
 At first launch the payload is expanded from the exe into
-`%LOCALAPPDATA%\com.brodie.agentmanager\app\`, which is also where `serve.mjs`
+`%APPDATA%\com.brodie.agentmanager\app\`, which is also where `serve.mjs`
 writes `state.json`, `backend.log` and `port-<pid>.txt`. That is also the first
 place to look when the app starts but shows the failure page — `backend.log` has
 the URL it bound and anything that went wrong.
