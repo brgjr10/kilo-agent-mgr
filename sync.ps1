@@ -14,7 +14,7 @@ $mirror = "C:\Users\brgjr\AppData\Projects\agent-manager"
 $share = "\\zimaserver\ZimaOS-HD\AppData\Projects\agent-manager"
 
 # individual files (flat, no folder)
-$files = @("collector.mjs", "serve.mjs", "dashboard.html", "README.md", "sync.ps1")
+$files = @("collector.mjs", "serve.mjs", "index.html", "README.md", "sync.ps1", "chat.mjs", "workspace.mjs", "kilo-bin.mjs")
 
 # folders that should be copied recursively as a whole
 $folders = @("assets")
@@ -33,6 +33,9 @@ if (-not (Test-Path -LiteralPath $to)) {
   New-Item -ItemType Directory -Path $to -Force | Out-Null
 }
 
+Write-Host ("{0,-16} {1}" -f "FILE", "STATUS")
+Write-Host ("{0,-16} {1}" -f "----", "------")
+
 foreach ($f in $files) {
   $p = Join-Path $from $f
   if (-not (Test-Path -LiteralPath $p)) {
@@ -40,7 +43,9 @@ foreach ($f in $files) {
     continue
   }
   Copy-Item -LiteralPath $p -Destination (Join-Path $to $f) -Force
-  Write-Host ("{0,-16} ok" -f $f)
+  $dest = Join-Path $to $f
+  $mtime = (Get-Item -LiteralPath $dest).LastWriteTime.ToString("yyyy-MM-dd HH:mm:ss")
+  Write-Host ("{0,-16} ok ({1})" -f $f, $mtime)
 }
 
 foreach ($d in $folders) {
@@ -53,6 +58,7 @@ foreach ($d in $folders) {
   if (-not (Test-Path -LiteralPath $toDir)) {
     New-Item -ItemType Directory -Path $toDir -Force | Out-Null
   }
+  $count = 0
   Get-ChildItem -LiteralPath $fromDir -File -Recurse | ForEach-Object {
     $rel = $_.FullName.Substring($fromDir.Length + 1)
     $dest = Join-Path $toDir $rel
@@ -61,8 +67,9 @@ foreach ($d in $folders) {
       New-Item -ItemType Directory -Path $destDir -Force | Out-Null
     }
     Copy-Item -LiteralPath $_.FullName -Destination $dest -Force
+    $count++
   }
-  Write-Host ("{0,-16} ok ({1} files)" -f $d, (Get-ChildItem -LiteralPath $fromDir -File -Recurse).Count)
+  Write-Host ("{0,-16} ok ({1} files)" -f $d, $count)
 }
 
 Write-Host ("done. {0}" -f $label)
