@@ -400,6 +400,22 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url === "/api/reset" && req.method === "POST") {
+    try {
+      fs.writeFileSync(STATE, JSON.stringify({ details: [], sessions: [], errors: [], generatedAt: null, version: null, agents: [] }, null, 2), "utf8");
+      const cacheDir = path.join(__dir, ".cache");
+      if (fs.existsSync(cacheDir)) {
+        for (const entry of fs.readdirSync(cacheDir)) {
+          try { fs.unlinkSync(path.join(cacheDir, entry)); } catch { /* skip */ }
+        }
+      }
+      json(res, 200, { ok: true, reset: true });
+    } catch (e) {
+      json(res, 500, { ok: false, error: "reset failed: " + e.message });
+    }
+    return;
+  }
+
   if (url === "/api/state" || url === "/api/collect") {
     collect(res);
     return;

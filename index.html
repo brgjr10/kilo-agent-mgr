@@ -1021,6 +1021,18 @@ th {
       border-color: var(--blue);
       background: var(--row);
     }
+
+    #resetBoard {
+      color: var(--red);
+      border-color: var(--red-dim);
+    }
+    #resetBoard:hover {
+      background: rgba(248, 81, 73, 0.08);
+    }
+    #resetBoard:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 
@@ -1037,6 +1049,7 @@ th {
     <button id="autoBtn" aria-pressed="true" title="poll state.json every 5s">Auto 5s</button>
     <button id="refresh" title="refresh now ( r )">Refresh</button>
     <button id="chatToggle" aria-pressed="false" title="open the chat window ( c )">Chat</button>
+    <button id="resetBoard" title="clear state.json and cache, board goes empty until next collect">Reset board</button>
   </header>
   <main>
     <div class="banner hidden" id="banner"></div>
@@ -2265,6 +2278,23 @@ th {
       $('#chatNew').addEventListener('click', newChat);
       $('#chatSend').addEventListener('click', sendChat);
       $('#chatStop').addEventListener('click', stopChat);
+
+      $('#resetBoard').addEventListener('click', async () => {
+        const ok = confirm('This clears state.json and .cache/. The board goes empty until the next collect. Continue?');
+        if (!ok) return;
+        const btn = $('#resetBoard');
+        btn.disabled = true;
+        btn.textContent = 'resetting…';
+        try {
+          await api('/api/reset', { method: 'POST' });
+          load();
+        } catch (e) {
+          alert('reset failed: ' + e.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Reset board';
+        }
+      });
 
       $('#chatDir').addEventListener('change', (e) => {
         chat.directory = e.target.value;
