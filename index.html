@@ -743,6 +743,197 @@ th {
       font-size: 12px;
       padding: 10px;
     }
+
+    /* ---- chat dock ---- */
+    /* Fixed right-hand panel rather than another section in the page: the board,
+       tree and table are all full-width grids, and a docked panel leaves them
+       readable while a chat scrolls beside them. */
+    .dock {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 460px;
+      z-index: 40;
+      display: none;
+      flex-direction: column;
+      background: var(--card);
+      border-left: 1px solid var(--border);
+      box-shadow: -12px 0 32px rgba(1, 4, 9, 0.5);
+    }
+
+    body.dock-open .dock {
+      display: flex;
+    }
+
+    body.dock-open main {
+      margin-right: 460px;
+    }
+
+    body.dock-open header {
+      padding-right: 476px;
+    }
+
+    @media (max-width: 1200px) {
+
+      /* Too narrow to split: the dock takes the screen and the page scrolls
+         underneath it. */
+      .dock {
+        width: 100%;
+      }
+
+      body.dock-open main {
+        margin-right: 0;
+      }
+
+      body.dock-open header {
+        padding-right: 16px;
+      }
+    }
+
+    .dock-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg);
+      flex-wrap: wrap;
+    }
+
+    .dock-head h2 {
+      margin: 0;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+    }
+
+    .dock-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .dock-bar select,
+    .dock-bar input[type="text"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 4px 7px;
+      font: inherit;
+      font-size: 11px;
+      font-family: var(--mono);
+      min-width: 0;
+      max-width: 100%;
+    }
+
+    .dock-bar select:focus,
+    .dock-bar input[type="text"]:focus {
+      outline: none;
+      border-color: var(--blue);
+    }
+
+    #chatWs {
+      flex: 1 1 190px;
+    }
+
+    #chatModel {
+      flex: 1 1 150px;
+    }
+
+    .dock-ws {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      min-width: 0;
+    }
+
+    .dock-ws .path {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      direction: rtl;
+      text-align: left;
+    }
+
+    .dock-body {
+      flex: 1;
+      overflow: auto;
+      padding: 8px;
+      min-height: 0;
+    }
+
+    .dock-foot {
+      border-top: 1px solid var(--border);
+      padding: 8px 10px;
+      background: var(--bg);
+    }
+
+    .dock-foot textarea {
+      width: 100%;
+      min-height: 62px;
+      max-height: 190px;
+      resize: vertical;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 9px;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    .dock-foot textarea:focus {
+      outline: none;
+      border-color: var(--blue);
+    }
+
+    .dock-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 7px;
+    }
+
+    .dock-actions .spacer {
+      flex: 1;
+    }
+
+    .dock-note {
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--muted);
+    }
+
+    /* Per-row shortcut that opens the dock already attached to that session. */
+    .attach {
+      border: 1px solid var(--border);
+      background: var(--card2);
+      color: var(--blue);
+      border-radius: 5px;
+      padding: 0 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      cursor: pointer;
+      line-height: 17px;
+    }
+
+    .attach:hover {
+      border-color: var(--blue);
+      background: var(--row);
+    }
   </style>
 </head>
 
@@ -754,6 +945,7 @@ th {
     <input type="search" id="search" placeholder="filter sessions, agents, activity…  ( / )" autocomplete="off">
     <button id="autoBtn" aria-pressed="true" title="poll state.json every 5s">Auto 5s</button>
     <button id="refresh" title="refresh now ( r )">Refresh</button>
+    <button id="chatToggle" aria-pressed="false" title="open the chat window ( c )">Chat</button>
   </header>
   <main>
     <div class="banner hidden" id="banner"></div>
@@ -766,7 +958,8 @@ th {
     <div class="tree" id="tree"></div>
 
     <div class="section-title">Sessions <span class="count" id="sessCount"></span> <span class="legend">click a column
-        header to sort · <span class="kbd">/</span> search · <span class="kbd">r</span> refresh</span></div>
+        header to sort · <span class="kbd">/</span> search · <span class="kbd">r</span> refresh ·
+        <span class="kbd">c</span> chat</span></div>
     <div class="scroll">
       <table id="sessions">
         <thead>
@@ -788,6 +981,40 @@ th {
     <div class="section-title" id="detailTitle">Session detail</div>
     <div class="board" id="detail"></div>
   </main>
+
+  <aside class="dock" id="dock" aria-label="Chat">
+    <div class="dock-head">
+      <h2>Chat</h2>
+      <span class="badge" id="chatState">idle</span>
+      <div class="spacer"></div>
+      <button id="chatWsReload" title="re-detect the folder open in VSCodium">Detect</button>
+      <button id="chatClose" title="close ( c )">✕</button>
+    </div>
+
+    <div class="dock-ws">
+      <span class="path" id="chatWsPath">—</span>
+      <span class="badge" id="chatWsSource">—</span>
+    </div>
+
+    <div class="dock-bar">
+      <select id="chatDir" title="workspace directory"></select>
+      <select id="chatModel" title="model"></select>
+      <button id="chatNew" title="start a new conversation in this workspace">New</button>
+    </div>
+
+    <div class="dock-body" id="chatBody"></div>
+
+    <div class="dock-foot">
+      <textarea id="chatInput" placeholder="Ask about this workspace…  ( Enter to send · Shift+Enter for a newline )"
+        spellcheck="false"></textarea>
+      <div class="dock-actions">
+        <button id="chatSend" disabled>Send</button>
+        <button id="chatStop" class="hidden" title="stop the running turn">Stop</button>
+        <div class="spacer"></div>
+        <span class="dock-note" id="chatNote"></span>
+      </div>
+    </div>
+  </aside>
   <script>
     (function () {
       'use strict';
@@ -893,7 +1120,8 @@ th {
         card.appendChild(el('div', 'row1',
           el('span', 'badge ' + st.cls, st.label),
           title,
-          el('span', 'badge', d.agent || '?')
+          el('span', 'badge', d.agent || '?'),
+          attachButton(d)
         ));
 
         card.appendChild(el('div', 'sub',
@@ -1197,6 +1425,8 @@ th {
           a.href = '#';
           a.onclick = (e) => { e.preventDefault(); select(d.id); };
           titleCell.appendChild(a);
+          titleCell.appendChild(document.createTextNode(' '));
+          titleCell.appendChild(attachButton(d));
           tr.appendChild(titleCell);
           tr.appendChild(el('td', 'mono', d.agent || '—'));
           tr.appendChild(el('td', null, el('span', 'badge ' + st.cls, st.label)));
@@ -1290,9 +1520,379 @@ th {
           if (e.key === 'Escape') { search.value = ''; state.query = ''; render(); search.blur(); }
           return;
         }
+        // Never steal single-key shortcuts from a field the user is typing in —
+        // "/" and "r" are ordinary characters in a chat message.
+        const typing = e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT' ||
+          (e.target.tagName === 'INPUT' && e.target.type !== 'range'));
+        if (typing) {
+          if (e.key === 'Escape') { e.target.blur(); if (chat.open && e.target === chatInput) setDock(false); }
+          return;
+        }
         if (e.key === '/') { e.preventDefault(); search.focus(); }
         else if (e.key === 'r') { e.preventDefault(); load(); }
+        else if (e.key === 'c' && !e.ctrlKey && !e.metaKey) { e.preventDefault(); setDock(!chat.open); }
         else if (e.key === 'Escape') { state.selected = null; render(); }
+      });
+
+      // ---- chat dock ----
+      // The dock owns one kilo session at a time. Entries are held in a map keyed
+      // by kilo part id so streamed deltas and full part updates land on the same
+      // row instead of appending duplicates.
+      const chat = {
+        open: false, workspace: null, source: null, directory: null,
+        sessionId: null, model: '', models: [], dirs: [],
+        raw: new Map(), order: [], base: [], roles: new Map(),
+        es: null, streaming: false, error: null, loading: false, note: '',
+      };
+
+      // A part event carries no role — only the message event does — and the part
+      // can arrive first. So kilo parts are kept raw and turned into rows at
+      // render time, by which point the role is known; backfilled entries are
+      // already role-tagged and kept separately in `base`.
+      const roleOf = (messageID) => (chat.roles.get(messageID) === 'user' ? 'user' : 'assistant');
+
+      const partEntry = (part) => {
+        if (!part) return null;
+        const role = roleOf(part.messageID);
+        if (part.type === 'text') return { r: role, k: 'text', t: part.text || '', st: null };
+        if (part.type === 'reasoning') return { r: 'assistant', k: 'reasoning', t: part.text || '', st: null };
+        if (part.type === 'tool') {
+          const s = part.state || {};
+          const snip = s.status === 'error' ? (s.error || s.output) : s.output;
+          return {
+            r: 'assistant', k: 'tool', tool: part.tool || 'tool', st: s.status || 'unknown',
+            t: s.title || part.tool || '', o: String(snip == null ? '' : snip).replace(/\s+/g, ' ').trim().slice(0, 600),
+          };
+        }
+        return null;
+      };
+
+      function chatReset(sessionId, directory) {
+        chat.raw = new Map();
+        chat.order = [];
+        chat.base = [];
+        chat.roles = new Map();
+        chat.sessionId = sessionId;
+        chat.error = null;
+        chat.streaming = false;
+        if (directory) chat.directory = directory;
+      }
+
+      function chatSet(id, part) {
+        if (!id || !part) return;
+        if (!chat.raw.has(id)) chat.order.push(id);
+        chat.raw.set(id, part);
+      }
+
+      function chatEntries() {
+        return chat.base.concat(chat.order.map((id) => partEntry(chat.raw.get(id))).filter(Boolean));
+      }
+
+      async function api(path, init) {
+        const r = await fetch(path, Object.assign({ cache: 'no-store' }, init || {}));
+        let j = null;
+        try { j = await r.json(); } catch { j = { ok: false, error: 'HTTP ' + r.status }; }
+        if (!r.ok || !j.ok) throw new Error((j && j.error) || ('HTTP ' + r.status));
+        return j;
+      }
+
+      async function loadWorkspace() {
+        try {
+          const j = await api('/api/chat/workspace' + (chat.directory ? '?dir=' + encodeURIComponent(chat.directory) : ''));
+          chat.workspace = j;
+          chat.source = j.source;
+          // An explicit pick wins over detection, but keep re-detecting so the
+          // button can jump back to whatever VSCodium actually has open.
+          if (!chat.directory || j.source !== 'explicit') chat.directory = j.directory;
+          chat.dirs = j.candidates || [];
+          paintWorkspace();
+        } catch (e) {
+          chat.error = 'workspace: ' + e.message;
+          paintWorkspace();
+        }
+      }
+
+      function paintWorkspace() {
+        $('#chatWsPath').textContent = chat.directory || 'no workspace detected';
+        $('#chatWsPath').title = chat.directory || '';
+        const src = $('#chatWsSource');
+        src.textContent = chat.workspace && chat.workspace.pinned ? 'pinned' : (chat.source || '—');
+        src.className = 'badge ' + (chat.source === 'window' ? 'green' : chat.source === 'explicit' ? 'blue' : '');
+        if (chat.workspace && chat.workspace.ambiguous && chat.workspace.ambiguous.length) {
+          src.textContent = chat.source + ' (ambiguous)';
+          src.title = 'Several workspaces share that folder name:\n' + chat.workspace.ambiguous.join('\n');
+        }
+
+        const sel = $('#chatDir');
+        const wanted = chat.directory || '';
+        const opts = chat.dirs.slice();
+        if (wanted && !opts.includes(wanted)) opts.unshift(wanted);
+        sel.replaceChildren(...opts.map((d) => {
+          const o = document.createElement('option');
+          o.value = d;
+          o.textContent = d;
+          return o;
+        }));
+        sel.value = wanted;
+      }
+
+      async function loadModels() {
+        try {
+          const j = await api('/api/chat/models');
+          chat.models = j.models || [];
+          chat.model = j.default;
+          const sel = $('#chatModel');
+          const free = chat.models.filter((m) => !m.cost);
+          const paid = chat.models.filter((m) => m.cost);
+          const mk = (label, list) => {
+            if (!list.length) return null;
+            const g = document.createElement('optgroup');
+            g.label = label;
+            list.forEach((m) => {
+              const o = document.createElement('option');
+              o.value = m.ref;
+              o.textContent = m.name;
+              g.appendChild(o);
+            });
+            return g;
+          };
+          sel.replaceChildren(...[mk('no per-token cost', free), mk('metered', paid)].filter(Boolean));
+          if (!sel.options.length) {
+            // Never leave the picker blank: booting the private kilo server can
+            // take a moment, and an empty select silently blocks New.
+            const o = document.createElement('option');
+            o.value = chat.model;
+            o.textContent = chat.model;
+            sel.appendChild(o);
+          }
+          if ([...sel.options].some((o) => o.value === chat.model)) sel.value = chat.model;
+          else chat.model = sel.value;
+        } catch (e) {
+          chat.error = 'models: ' + e.message;
+          renderChat();
+        }
+      }
+
+      function closeStream() {
+        if (chat.es) { chat.es.close(); chat.es = null; }
+        chat.streaming = false;
+      }
+
+      function connectStream() {
+        closeStream();
+        if (!chat.sessionId) return;
+        const es = new EventSource('/api/chat/events?session=' + encodeURIComponent(chat.sessionId));
+        chat.es = es;
+
+        es.onmessage = (m) => {
+          let ev;
+          try { ev = JSON.parse(m.data); } catch { return; }
+          const p = ev.properties || {};
+          switch (ev.type) {
+            case 'chat.open':
+              chat.directory = p.directory || chat.directory;
+              chat.note = p.sessionID;
+              break;
+            case 'message.updated':
+              if (p.info && p.info.id) chat.roles.set(p.info.id, p.info.role);
+              if (p.info?.role === 'assistant') chat.streaming = true;
+              break;
+            case 'message.part.updated':
+              chatSet(p.part && p.part.id, p.part);
+              if (p.part?.type === 'tool') chat.note = p.part.tool + ':' + ((p.part.state || {}).status || '');
+              break;
+            case 'message.part.delta': {
+              const part = chat.raw.get(p.partID);
+              if (part && part.type !== 'tool') part.text = (part.text || '') + (p.delta || '');
+              break;
+            }
+            case 'message.part.removed':
+              chat.raw.delete(p.partID);
+              chat.order = chat.order.filter((id) => id !== p.partID);
+              break;
+            case 'session.status':
+              chat.note = p.status && p.status.type ? p.status.type : chat.note;
+              if (p.status?.type === 'busy') chat.streaming = true;
+              break;
+            case 'session.error':
+              chat.error = (p.error && (p.error.message || p.error.data?.message)) || 'session error';
+              break;
+            case 'session.idle':
+              chat.streaming = false;
+              chat.note = 'idle';
+              break;
+            default:
+              break;
+          }
+          renderChat();
+        };
+        es.onerror = () => {
+          // EventSource retries on its own; only surface it so a dead backend is
+          // not mistaken for a quiet agent.
+          if (es.readyState === EventSource.CLOSED) {
+            chat.error = 'event stream closed — the chat backend may have stopped';
+            chat.streaming = false;
+            renderChat();
+          }
+        };
+      }
+
+      async function newChat() {
+        closeStream();
+        chat.loading = true;
+        chat.directory = $('#chatDir').value || chat.directory;
+        renderChat();
+        try {
+          const j = await api('/api/chat/session', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ directory: chat.directory, model: chat.model }),
+          });
+          chatReset(j.session.id, j.workspace);
+          chat.note = j.session.id;
+          connectStream();
+        } catch (e) {
+          chat.error = e.message;
+          chat.sessionId = null;
+        } finally {
+          chat.loading = false;
+          renderChat();
+        }
+      }
+
+      async function attachSession(id) {
+        closeStream();
+        chat.loading = true;
+        renderChat();
+        try {
+          const j = await api('/api/chat/session/' + encodeURIComponent(id));
+          chatReset(id, j.directory);
+          chat.base = j.log;
+          chat.note = id;
+          connectStream();
+        } catch (e) {
+          chat.error = e.message;
+          chat.sessionId = null;
+        } finally {
+          chat.loading = false;
+          renderChat();
+        }
+      }
+
+      async function sendChat() {
+        const box = $('#chatInput');
+        const text = box.value.trim();
+        if (!text || !chat.sessionId || chat.streaming) return;
+        box.value = '';
+        box.style.height = '';
+        try {
+          await api('/api/chat/send', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ session: chat.sessionId, text }),
+          });
+          chat.error = null;
+          chat.streaming = true;
+        } catch (e) {
+          chat.error = e.message;
+          chat.streaming = false;
+          box.value = text;
+        }
+        renderChat();
+      }
+
+      async function stopChat() {
+        if (!chat.sessionId) return;
+        try {
+          await api('/api/chat/abort', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ session: chat.sessionId }),
+          });
+        } catch (e) { chat.error = e.message; }
+        chat.streaming = false;
+        renderChat();
+      }
+
+      function renderChat() {
+        const body = $('#chatBody');
+        const entries = chatEntries();
+        body.replaceChildren();
+
+        if (chat.loading) {
+          body.appendChild(el('div', 'log-empty', 'loading conversation…'));
+        } else if (chat.error) {
+          const b = el('div', 'log-empty', chat.error);
+          b.style.color = 'var(--red)';
+          body.appendChild(b);
+        }
+        if (!chat.sessionId && !chat.loading) {
+          const hint = chat.open
+            ? 'No conversation yet. Pick a folder and press New.'
+            : 'Open the chat window to talk to an agent about the folder open in VSCodium.';
+          body.appendChild(el('div', 'log-empty', hint));
+        }
+        const rows = entries.map(logRow).filter(Boolean);
+        rows.forEach((r) => body.appendChild(r));
+        if (rows.length) queueMicrotask(() => { body.scrollTop = body.scrollHeight; });
+
+        const st = $('#chatState');
+        st.textContent = chat.loading ? 'connecting' : chat.streaming ? 'working' : chat.sessionId ? 'ready' : 'no session';
+        st.className = 'badge ' + (chat.loading || chat.streaming ? 'blue' : chat.sessionId ? 'green' : '');
+        $('#chatNote').textContent = chat.note || '';
+        // Booting the private kilo server can take several seconds; without
+        // reflecting that here, Send silently does nothing on the first click.
+        $('#chatSend').disabled = !chat.sessionId || chat.loading || chat.streaming || !$('#chatInput').value.trim();
+        $('#chatNew').disabled = chat.loading;
+        $('#chatStop').classList.toggle('hidden', !chat.streaming || chat.loading);
+      }
+
+      function setDock(open) {
+        chat.open = open;
+        document.body.classList.toggle('dock-open', open);
+        const b = $('#chatToggle');
+        b.setAttribute('aria-pressed', String(open));
+        b.classList.toggle('on', open);
+        if (open) {
+          if (!chat.directory) loadWorkspace();
+          if (!chat.models.length) loadModels();
+          $('#chatInput').focus();
+        }
+        renderChat();
+      }
+
+      // ---- attach shortcuts ----
+      // Reached from an agent card or session row, so a conversation can continue
+      // a session the dashboard is already tracking instead of starting fresh.
+      function attachButton(d) {
+        const b = el('button', 'attach', 'chat');
+        b.title = 'open the chat window attached to ' + (d.title || d.id);
+        b.onclick = (e) => { e.stopPropagation(); setDock(true); attachSession(d.id); };
+        return b;
+      }
+
+      $('#chatToggle').addEventListener('click', () => setDock(!chat.open));
+      $('#chatClose').addEventListener('click', () => setDock(false));
+      $('#chatWsReload').addEventListener('click', () => { chat.directory = null; loadWorkspace(); });
+      $('#chatNew').addEventListener('click', newChat);
+      $('#chatSend').addEventListener('click', sendChat);
+      $('#chatStop').addEventListener('click', stopChat);
+
+      $('#chatDir').addEventListener('change', (e) => {
+        chat.directory = e.target.value;
+        paintWorkspace();
+      });
+
+      const chatInput = $('#chatInput');
+      chatInput.addEventListener('input', () => {
+        // grow with the content, then stop — a chat box taller than the dock is
+        // just a scroll hazard
+        chatInput.style.height = 'auto';
+        chatInput.style.height = Math.min(chatInput.scrollHeight, 190) + 'px';
+        renderChat();
+      });
+      chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
       });
 
       paintAuto();

@@ -1,3 +1,14 @@
 # runtime artifacts — safe to delete / regenerated on every collect
 .cache/
 state.json
+
+# desktop build staging — all produced by `node desktop/stage.mjs`
+# payload/ holds a ~100 MB node.exe and must never be committed
+desktop/src-tauri/payload/
+desktop/src-tauri/icons/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+desktop/node_modules/
+
+# Windows noise
+Thumbs.db

@@ -1,0 +1,88 @@
+name: Build Windows app
+
+# The desktop shell is a Tauri build, so it needs Rust and the MSVC toolchain —
+# neither of which belongs on a workstation. This builds it on a runner and hands
+# back a single portable exe.
+#
+#   Agent Manager.exe, no installer. Double-click it and it starts its own
+#   backend on a free port and shows the dashboard.
+#
+# The Kilo CLI is deliberately NOT bundled: the authenticated binary lives in
+# the editor's extension folder, and kilo-bin.mjs discovers the newest one at
+# runtime.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "*.mjs"
+      - "index.html"
+      - "assets/**"
+      - ".github/workflows/build-windows.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Portable exe (windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Must match desktop/stage.mjs's default so the bundled node.exe is the
+      # same LTS line the backend was written against.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.20.0"
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: tauri-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: tauri-${{ runner.os }}-
+
+      # Builds the payload (runtime files + node.exe) and the icon set. Everything
+      # under payload/ and icons/ is generated, so none of it is committed.
+      - name: Stage payload and icons
+        working-directory: desktop
+        run: node stage.mjs
+
+      # --no-bundle is the whole point: it emits the raw executable instead of an
+      # MSI/NSIS installer, which is what makes the result portable.
+      #
+      # The npm CLI rather than `cargo install tauri-cli`: same tool, pinned to a
+      # major, and it skips a long compile of the CLI itself.
+      - name: Build
+        working-directory: desktop
+        run: npx --yes @tauri-apps/cli@2 build --no-bundle
+
+      - name: Collect artifact
+        run: |
+          $exe = "desktop\src-tauri\target\release\agent-manager.exe"
+          if (-not (Test-Path $exe)) { throw "expected $exe to exist" }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $exe "dist\AgentManager.exe"
+          Get-Item "dist\AgentManager.exe" | Select-Object Name, Length
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentManager-windows-x64
+          path: dist/AgentManager.exe
+          if-no-files-found: error
+          retention-days: 30

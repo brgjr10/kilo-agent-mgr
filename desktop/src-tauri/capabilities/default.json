@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "The dashboard window. The page is served from 127.0.0.1 by the bundled backend and uses no Tauri IPC — the shell only supplies the window and the process lifecycle.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

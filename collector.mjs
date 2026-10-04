@@ -19,11 +19,12 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { kiloBin } from "./kilo-bin.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-const KILO_BIN =
-  process.env.KILO_BIN ||
-  "C:\\Users\\brgjr\\.vscode-oss\\extensions\\kilocode.kilo-code-7.8.1-win32-x64\\bin\\kilo.exe";
+// Resolved, not pinned: the Kilo extension updates itself and renames its
+// version folder, which used to leave the dashboard pointing at a deleted exe.
+const KILO_BIN = kiloBin();
 
 function arg(flag, def) {
   const i = process.argv.indexOf(flag);
@@ -247,6 +248,12 @@ const data = {
 };
 
 const fail = (label, e) => data.errors.push(`${label}: ${e && e.message ? e.message : e}`);
+
+if (!KILO_BIN) {
+  fail("kilo", new Error(
+    "kilo CLI not found. Install the Kilo Code extension, or set $env:KILO_BIN to its bin\\kilo.exe"
+  ));
+}
 
 try {
   data.version = run(["--version"]).split(/\s/).pop();

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentManager",
+  "version": "1.0.0",
+  "identifier": "com.brodie.agentmanager",
+  "build": {
+    "frontendDist": "../frontend"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; script-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "payload/README.md": "agent-manager/README.md",
+      "payload/index.html": "agent-manager/index.html",
+      "payload/serve.mjs": "agent-manager/serve.mjs",
+      "payload/collector.mjs": "agent-manager/collector.mjs",
+      "payload/chat.mjs": "agent-manager/chat.mjs",
+      "payload/workspace.mjs": "agent-manager/workspace.mjs",
+      "payload/kilo-bin.mjs": "agent-manager/kilo-bin.mjs",
+      "payload/assets": "agent-manager/assets",
+      "payload/node.exe": "agent-manager/node.exe"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      }
+    }
+  }
+}

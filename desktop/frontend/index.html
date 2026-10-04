@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <title>Agent Manager</title>
+  <style>
+    body {
+      margin: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: #0d1117;
+      color: #e6edf3;
+      font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      text-align: center;
+      padding: 24px;
+    }
+
+    h1 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    p {
+      margin: 0;
+      color: #8b949e;
+      max-width: 34em;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #58a6ff;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.2;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .dot {
+        animation: none;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="dot"></div>
+  <h1>Starting the Agent Manager backend…</h1>
+  <p>Waiting for the local server to report the port it bound.</p>
+</body>
+
+</html>

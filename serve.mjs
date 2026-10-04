@@ -4,13 +4,22 @@
  * (browsers block file:// fetches).
  *
  *   node serve.mjs [--port 8080] [--refresh] [--interval 8] [--detail 8]
+ *                  [--host 127.0.0.1] [--workspace <dir>] [--port-file <path>]
  *
- *   /dashboard.html          the dashboard
- *   /state.json              current snapshot
- *   /api/state               snapshot, regenerating it first
- *   /api/collect?detail=N    force a re-collect and return the new snapshot
- *   /api/session/<id>        full chat transcript for one session, on demand
+ *   /                            the dashboard
+ *   /state.json                  current snapshot
+ *   /api/state                   snapshot, regenerating it first
+ *   /api/collect?detail=N        force a re-collect and return the new snapshot
+ *   /api/session/<id>            full chat transcript for one session, on demand
  *                            (?limit= entries, ?chars= max chars per entry)
+ *
+ *   /api/chat/workspace      which folder VSCodium has open, and the candidates
+ *   /api/chat/models         tool-capable models for the chat picker
+ *   /api/chat/session        POST {directory,model} -> new session in that folder
+ *   /api/chat/session/<id>   full transcript for backfill
+ *   /api/chat/events?session= SSE, one session's events, forwarded verbatim
+ *   /api/chat/send           POST {session,text} -> admitted
+ *   /api/chat/abort          POST {session}
  *
  * With --refresh the collector runs every --interval seconds in the background
  * so the dashboard's 5s poll always sees fresh data.
@@ -20,6 +29,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import * as chat from "./chat.mjs";
+import { resolveWorkspace } from "./workspace.mjs";
+import { kiloBinOrFallback } from "./kilo-bin.mjs";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -30,10 +42,39 @@ function flag(name, def) {
 }
 const has = (name) => argv.includes(name);
 
+// Chat request bodies are tiny; a hard cap keeps a runaway client from parking
+// memory on the server.
+function readBody(req, cap = 1024 * 1024) {
+  return new Promise((done, fail) => {
+    let raw = "";
+    req.on("data", (b) => {
+      raw += b;
+      if (raw.length > cap) { fail(new Error("request body over " + cap + " bytes")); req.destroy(); }
+    });
+    req.on("error", fail);
+    req.on("end", () => {
+      if (!raw.trim()) return done({});
+      try { done(JSON.parse(raw)); } catch (e) { fail(new Error("body is not JSON: " + e.message)); }
+    });
+  });
+}
+
 const PORT = parseInt(flag("--port", "8080"), 10);
+// Loopback by default, and that default is not cosmetic: the chat window runs
+// tools with no permission prompt, so a listener on all interfaces would hand
+// anyone on the LAN an agent with shell access in this machine's projects.
+// Override only when you know what is on the other end of the socket.
+const HOST = flag("--host", "127.0.0.1");
 const DETAIL = flag("--detail", "8");
 const INTERVAL = parseInt(flag("--interval", "8"), 10);
 const AUTO_REFRESH = has("--refresh");
+// Pre-pins the chat workspace. Without it the dashboard asks VSCodium which
+// folder is open, which is right most of the time and wrong when the editor is
+// closed or several folders share a name.
+const WORKSPACE = flag("--workspace", null);
+// Written once listening, holding the bound port. The packaged app passes
+// --port 0 and reads this, so two copies never fight over a fixed port.
+const PORT_FILE = flag("--port-file", null);
 const STATE = path.join(__dir, "state.json");
 
 const TYPES = {
@@ -118,8 +159,7 @@ function serveFile(res, file) {
 // Streams one session's chat transcript straight from `kilo export`. Kept out of
 // state.json on purpose: the snapshot carries a tail preview for every tracked
 // session, and the full scrollback is only worth paying for on demand.
-const KILO_BIN = process.env.KILO_BIN ||
-  "C:\\Users\\brgjr\\.vscode-oss\\extensions\\kilocode.kilo-code-7.8.1-win32-x64\\bin\\kilo.exe";
+const KILO_BIN = kiloBinOrFallback();
 
 function clip(s, n) {
   s = String(s == null ? "" : s).replace(/\r/g, "");
@@ -208,6 +248,86 @@ async function transcript(req, res, id) {
   }));
 }
 
+function json(res, status, body) {
+  res.writeHead(status, { "Content-Type": TYPES[".json"], "Cache-Control": "no-store" });
+  res.end(JSON.stringify(body));
+}
+
+// Chat endpoints always answer with JSON, including failures: the browser shows
+// the message in the chat window rather than silently dropping the turn.
+async function chatRoute(req, res, url, parsed) {
+  const route = url.slice("/api/chat".length) || "/";
+  const q = parsed.searchParams;
+
+  if (route === "/workspace" && req.method === "GET") {
+    const override = WORKSPACE || q.get("dir");
+    const ws = await resolveWorkspace({ override, statePath: STATE, fallback: __dir });
+    json(res, 200, { ok: true, ...ws, pinned: Boolean(WORKSPACE) });
+    return;
+  }
+
+  if (route === "/models" && req.method === "GET") {
+    json(res, 200, { ok: true, default: chat.DEFAULT_MODEL, models: await chat.models() });
+    return;
+  }
+
+  if (route === "/session" && req.method === "POST") {
+    const body = await readBody(req);
+    const override = WORKSPACE || body.directory;
+    const ws = await resolveWorkspace({ override, statePath: STATE, fallback: __dir });
+    if (!ws.directory) {
+      json(res, 400, { ok: false, error: "no workspace resolved — pass ?dir=<path> or start the server with --workspace" });
+      return;
+    }
+    const session = await chat.createSession({
+      directory: ws.directory,
+      model: body.model || chat.DEFAULT_MODEL,
+    });
+    json(res, 200, { ok: true, session, workspace: ws.directory });
+    return;
+  }
+
+  const msgs = route.match(/^\/session\/(ses_[A-Za-z0-9]+)$/);
+  if (msgs && req.method === "GET") {
+    const limit = Math.min(parseInt(q.get("limit") || "200", 10) || 200, 2000);
+    const chars = Math.min(parseInt(q.get("chars") || "4000", 10) || 4000, 200000);
+    const log = await chat.sessionMessages(msgs[1], { limit, chars });
+    const info = await chat.sessionInfo(msgs[1]);
+    json(res, 200, { ok: true, id: msgs[1], directory: info?.directory || null, total: log.length, log });
+    return;
+  }
+
+  if (route === "/events" && req.method === "GET") {
+    const sid = q.get("session");
+    if (!/^ses_[A-Za-z0-9]+$/.test(sid || "")) {
+      json(res, 400, { ok: false, error: "events needs ?session=ses_..." });
+      return;
+    }
+    await chat.streamSession(res, sid);
+    return;
+  }
+
+  if (route === "/send" && req.method === "POST") {
+    const body = await readBody(req);
+    if (!/^ses_[A-Za-z0-9]+$/.test(body.session || "") || !String(body.text || "").trim()) {
+      json(res, 400, { ok: false, error: "send needs {session, text}" });
+      return;
+    }
+    await chat.sendPrompt(body.session, String(body.text));
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  if (route === "/abort" && req.method === "POST") {
+    const body = await readBody(req);
+    await chat.abortSession(body.session);
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  json(res, 404, { ok: false, error: "unknown chat route: " + route });
+}
+
 const server = http.createServer((req, res) => {
   let url;
   let parsed;
@@ -226,12 +346,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.startsWith("/api/chat/")) {
+    chatRoute(req, res, url, parsed).catch((e) => {
+      if (res.headersSent) { res.end(); return; }
+      json(res, e && e.status ? e.status : 500, {
+        ok: false,
+        error: e && e.message ? e.message : String(e),
+      });
+    });
+    return;
+  }
+
   if (url === "/api/state" || url === "/api/collect") {
     collect(res);
     return;
   }
 
-  if (url === "/" || url === "/index.html") url = "/dashboard.html";
+  // The dashboard file used to be dashboard.html and is now index.html; accept
+  // both so bookmarks and the README's URL keep working.
+  if (url === "/" || url === "/dashboard.html") url = "/index.html";
   const target = path.resolve(__dir, "." + url);
   if (target !== __dir && !target.startsWith(__dir + path.sep)) {
     res.writeHead(403, { "Content-Type": "text/plain" });
@@ -241,24 +374,50 @@ const server = http.createServer((req, res) => {
   serveFile(res, target);
 });
 
-server.listen(PORT, () => {
-  console.log("Agent Manager → http://localhost:" + PORT);
+server.listen(PORT, HOST, () => {
+  // The real port, which differs from the requested one when --port 0 asked the
+  // OS to pick. Both this line and the optional port file exist so a native
+  // launcher can wait for readiness instead of sleeping and hoping.
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : PORT;
+  const url = `http://${HOST.includes(":") ? `[${HOST}]` : HOST}:${port}`;
+  if (PORT_FILE) {
+    try { fs.writeFileSync(PORT_FILE, String(port), "utf8"); } catch { /* best effort */ }
+  }
+  console.log("Agent Manager → " + url);
+  console.log("READY " + url);
+  if (WORKSPACE) console.log("chat workspace pinned to " + WORKSPACE);
   if (!fs.existsSync(STATE)) {
-    console.log("state.json missing — collecting now (first run can take a minute) …");
-    collect({ writeHead() {}, end() {} });
+    // A first collect can take a minute and collect() is synchronous, so running
+    // it inline here would leave the socket bound but unresponsive — the packaged
+    // app would show a connection error instead of a loading dashboard. Hand it
+    // to the refresh loop instead, and only block when nothing else will collect.
+    console.log(AUTO_REFRESH
+      ? "state.json missing — the refresh loop will collect shortly"
+      : "state.json missing — collecting now (first run can take a minute) …");
+    if (!AUTO_REFRESH) collect({ writeHead() {}, end() {} });
   }
   if (AUTO_REFRESH) {
     console.log("auto-refresh every " + INTERVAL + "s (next run starts after the previous one finishes)");
     scheduleLoop();
-    const bye = () => { if (timer) clearTimeout(timer); server.close(() => process.exit(0)); };
-    process.on("SIGINT", bye);
-    process.on("SIGTERM", bye);
   }
 });
 
+// Registered unconditionally: the chat window can boot a private kilo server even
+// without --refresh, and leaving it orphaned would hold port 9789 open.
+const bye = () => {
+  if (timer) clearTimeout(timer);
+  chat.stopKiloServer();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 2000).unref();
+};
+process.on("SIGINT", bye);
+process.on("SIGTERM", bye);
+process.on("exit", () => chat.stopKiloServer());
+
 server.on("error", (e) => {
   if (e.code === "EADDRINUSE") {
-    console.error("port " + PORT + " is already in use — stop the other server or pass --port 8081");
+    console.error("port " + PORT + " is already in use — stop the other server or pass --port 0 to pick a free one");
     process.exit(1);
   }
   throw e;

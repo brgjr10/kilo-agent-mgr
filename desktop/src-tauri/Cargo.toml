@@ -1,0 +1,27 @@
+[package]
+name = "agent-manager"
+version = "1.0.0"
+description = "Agent Manager — live Kilo agent dashboard with a chat window"
+authors = ["Brodie Grant"]
+edition = "2021"
+rust-version = "1.85"
+
+[lib]
+name = "agent_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+[profile.release]
+# The payload's node.exe is already large; stripping and LTO keep the shipped
+# shell small without making the first build unreasonably slow.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
