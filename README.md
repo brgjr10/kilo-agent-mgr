@@ -37,31 +37,34 @@ have to stay distinguishable at a glance.
 
 ### How the 5s poll stays affordable
 
-Glass is expensive per element, and this board repaints every 5 seconds. Four
-things keep it cheap, in order of how much they buy:
+Glass is expensive per element, and this board repaints every 5 seconds. Two
+things were making it unaffordable, and neither is the displacement filter:
 
-| Change | Why |
+| Cause | Fix |
 | --- | --- |
-| **Cards and rows reconcile instead of rebuilding** | A rebuilt card is a new node with no filter, so it must be re-measured, re-layered and re-composited — every 5s whether or not anything moved. A node whose content signature is unchanged is now left completely alone. |
-| **The detail panel skips entirely unless it changed** | It renders the whole transcript and is the most expensive node on the page. `updatedAt` is the collector's stamp on the export, so an unchanged stamp means unchanged content. |
-| **Bulk surfaces have no `backdrop-filter`** | `backdrop-filter` is not a cost the compositor amortises — 200 filtered layers is 200 separate blur passes over the same bloom. Cards, rows, badges, chips and keycaps keep their translucency and lit edge and just don't sample the backdrop. Under a dozen large surfaces keep it. |
-| **`content-visibility: auto` on cards and rows** | An off-screen card costs no backdrop work, no shadow raster and no text layout. |
+| **`backdrop-filter` cannot be shared.** Every element that declares one is its own snapshot of the backdrop plus its own blur pass. The page had 94 of them, including every button, field, badge, chip and keycap — none large enough for the effect to read. | Four now: the header, the chat dock, the session table and the transcript. Those are the only places glass actually overlaps *content*. Everything else is pure CSS translucency over a bloom that is already soft, so there is nothing there worth blurring. |
+| **`render()` rebuilt the board every poll.** A rebuilt card is a new node with no filter, so it must be re-measured, re-layered and re-composited — every 5s whether or not anything moved. | Cards, tree rows and table rows reconcile by key; a node whose content signature is unchanged is left completely alone. The detail panel renders the whole transcript and is skipped unless the selected session's data changed. The relative timestamp comes out of the signature and is patched into the existing node, so a tick of the clock no longer rebuilds anything. |
 
-Measured over 16s with the chat dock open and a session selected, same snapshot
-and same server, headless Chrome. Headless has no GPU, so these numbers are
-pessimistic and they move run to run with whatever the collector is doing — the
-structural counts are the stable part:
+Plus: `content-visibility: auto` on cards and rows, so an off-screen card costs no
+backdrop work, no shadow raster and no text layout; the grain overlay folded into
+the bloom layer, since two fixed full-viewport elements meant the page composited
+twice per frame; and `saturate()`/`brightness()` dropped from the blur recipe —
+two extra passes each, for a difference nobody can see against a soft bloom.
 
-| | v1.0.4 | this build |
+Measured over 16s with the chat dock open and a session selected, same server,
+headless Chrome (no GPU, so these are pessimistic):
+
+| | v1.0.4 | v1.0.5 |
 | --- | --- | --- |
-| cards compositing a backdrop | 3 of 3 | **0** |
-| elements compositing a backdrop | 94 | **45–61** |
-| frames delivered over 16s | 193 | **306–495** |
-| p95 frame | 401 ms | **233–317 ms** |
+| frames delivered | 193 | **913** |
+| p95 frame | 401 ms | **17 ms** |
+| worst frame | 450 ms | **67 ms** |
+| frames over 100 ms | 30 | **0** |
+| elements compositing a backdrop | 94 | **14** |
+| cards compositing a backdrop | 3 | **0** |
 
 The header shows the last repaint cost next to the snapshot age, so the claim is
-checkable rather than asserted. A poll where nothing moved sits in the low
-milliseconds.
+checkable rather than asserted. A poll where nothing moved sits at ~12ms.
 
 ## Run it
 
