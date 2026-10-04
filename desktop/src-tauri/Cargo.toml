@@ -16,6 +16,10 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 serde_json = "1"
+# Named explicitly rather than reached through tauri's re-export: WebviewUrl::External
+# takes a url::Url, and depending on the crate directly pins that type without
+# guessing which re-export is public.
+url = "2"
 
 [profile.release]
 # The payload's node.exe is already large; stripping and LTO keep the shipped

@@ -16,7 +16,11 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use url::Url;
 
 /// Bumped whenever the payload must be re-staged. Compared against a stamp file
 /// so an app update replaces the scripts without re-copying them every launch.
@@ -59,7 +63,7 @@ pub fn run() {
                     )
                     .title("Agent Manager")
                     .inner_size(940.0, 640.0)
-                    .initialization_script(&script)
+                    .initialization_script(script)
                     .build()?;
                 }
             }
@@ -92,7 +96,7 @@ fn stop_backend() {
 }
 
 /// Stage the payload, start the server, and return the URL it serves on.
-fn boot(handle: &tauri::AppHandle) -> Result<String, String> {
+fn boot(handle: &tauri::AppHandle) -> Result<Url, String> {
     let resource_dir = handle
         .path()
         .resource_dir()
@@ -196,13 +200,18 @@ fn boot(handle: &tauri::AppHandle) -> Result<String, String> {
 /// Poll the port file instead of sleeping a fixed amount. serve.mjs writes it the
 /// instant the socket binds, so this returns as fast as the server actually
 /// starts rather than always paying the full timeout.
-fn wait_for_port(port_file: &Path, log_path: &Path) -> Result<String, String> {
+fn wait_for_port(port_file: &Path, log_path: &Path) -> Result<Url, String> {
     let deadline = Instant::now() + BOOT_TIMEOUT;
     while Instant::now() < deadline {
         if let Ok(text) = fs::read_to_string(port_file) {
             let port = text.trim();
+            // Digits only: a truncated or half-written file must not become a URL.
             if !port.is_empty() && port.chars().all(|c| c.is_ascii_digit()) {
-                return Ok(format!("http://127.0.0.1:{port}"));
+                let raw = format!("http://127.0.0.1:{port}");
+                // WebviewUrl::External takes a parsed Url, not a string.
+                return raw
+                    .parse::<Url>()
+                    .map_err(|e| format!("{raw} is not a usable url: {e}"));
             }
         }
         std::thread::sleep(POLL);
