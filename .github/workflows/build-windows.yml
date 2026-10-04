@@ -116,6 +116,13 @@ jobs:
       contents: write
 
     steps:
+      # --generate-notes compares against the previous tag, and it does that by
+      # shelling out to git, so it needs a real repository. Full history, or
+      # there is nothing for it to diff against.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - uses: actions/download-artifact@v4
         with:
           name: AgentManager-windows-x64
