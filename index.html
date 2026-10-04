@@ -754,6 +754,76 @@ th {
       font-family: var(--mono);
     }
 
+    .md {
+      line-height: 1.55;
+    }
+    .md p { margin: 0 0 6px; }
+    .md p:last-child { margin-bottom: 0; }
+    .md h1, .md h2, .md h3, .md h4 { margin: 10px 0 4px; font-weight: 600; }
+    .md h1 { font-size: 14px; }
+    .md h2 { font-size: 13px; }
+    .md h3 { font-size: 12px; }
+    .md ul, .md ol { margin: 4px 0; padding-left: 18px; }
+    .md li { margin: 2px 0; }
+    .md blockquote {
+      margin: 4px 0;
+      padding: 4px 10px;
+      border-left: 3px solid var(--border);
+      color: var(--muted);
+    }
+    .md code {
+      font-family: var(--mono);
+      font-size: 11px;
+      background: var(--card2);
+      padding: 1px 5px;
+      border-radius: 4px;
+    }
+    .md pre.code-block {
+      margin: 6px 0;
+      padding: 8px 10px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: auto;
+      position: relative;
+    }
+    .md .code-lang {
+      position: absolute;
+      top: 4px;
+      right: 6px;
+      font-size: 10px;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+    .md pre.code-block code {
+      background: none;
+      padding: 0;
+      font-size: 11px;
+      line-height: 1.5;
+      display: block;
+    }
+    .md table.md-table {
+      border-collapse: collapse;
+      margin: 6px 0;
+      font-size: 11px;
+      width: auto;
+      max-width: 100%;
+    }
+    .md table.md-table th, .md table.md-table td {
+      border: 1px solid var(--border);
+      padding: 3px 7px;
+      text-align: left;
+    }
+    .md table.md-table th {
+      background: var(--card2);
+      font-weight: 600;
+    }
+    .md a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+    .md a:hover { text-decoration: underline; }
+
     .log-empty {
       color: var(--muted);
       font-family: var(--mono);
@@ -1190,6 +1260,116 @@ th {
         return row;
       }
 
+      // Small in-house markdown renderer. No deps, no innerHTML on model output.
+      function renderMd(text) {
+        const wrap = el('div', 'md');
+        if (!text) { wrap.appendChild(el('span', null, '')); return wrap; }
+        let src = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const codeBlocks = [];
+        src = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, body) => {
+          codeBlocks.push({ lang: lang || '', body: body.replace(/\n$/, '') });
+          return '\x00CODE' + (codeBlocks.length - 1) + '\x00';
+        });
+        const rawBlocks = src.split(/\n{2,}/);
+        for (const raw of rawBlocks) {
+          const block = raw.trim();
+          if (!block) continue;
+          const codeMatch = block.match(/^\x00CODE(\d+)\x00$/);
+          if (codeMatch) {
+            const cb = codeBlocks[parseInt(codeMatch[1])];
+            const pre = el('pre', 'code-block');
+            if (cb.lang) pre.appendChild(el('span', 'code-lang', cb.lang));
+            const code = el('code');
+            code.textContent = cb.body;
+            pre.appendChild(code);
+            wrap.appendChild(pre);
+            continue;
+          }
+          if (block.includes('|') && /^\|?[\s-]+\|/.test(block)) {
+            const rows = block.split('\n').filter(l => /^\|/.test(l.trim()));
+            if (rows.length >= 2) {
+              const table = el('table', 'md-table');
+              const tbody = el('tbody');
+              const sep = rows.findIndex(r => /^\|[\s\-:|]+\|$/.test(r.trim()));
+              const headerRows = sep > 0 ? rows.slice(0, sep) : [rows[0]];
+              const dataRows = sep > 0 ? rows.slice(sep + 1) : rows.slice(1);
+              for (const row of headerRows) {
+                const tr = el('tr');
+                row.split('|').filter(c => c.trim()).forEach(cell => tr.appendChild(el('th', null, cell.trim())));
+                tbody.appendChild(tr);
+              }
+              for (const row of dataRows) {
+                const tr = el('tr');
+                row.split('|').filter(c => c.trim()).forEach(cell => tr.appendChild(el('td', null, cell.trim())));
+                tbody.appendChild(tr);
+              }
+              table.appendChild(tbody);
+              wrap.appendChild(table);
+              continue;
+            }
+          }
+          const headingMatch = block.match(/^(#{1,6})\s+(.+)$/);
+          if (headingMatch) {
+            wrap.appendChild(el('h' + headingMatch[1].length, null, inlineMd(headingMatch[2])));
+            continue;
+          }
+          if (block.startsWith('> ')) {
+            const lines = block.split('\n').map(l => l.replace(/^>\s?/, '')).join('\n');
+            wrap.appendChild(el('blockquote', null, inlineMd(lines)));
+            continue;
+          }
+          if (/^[-*]\s/.test(block)) {
+            const ul = el('ul');
+            for (const line of block.split('\n')) {
+              const m = line.match(/^[-*]\s+(.+)$/);
+              if (m) ul.appendChild(el('li', null, inlineMd(m[1])));
+            }
+            wrap.appendChild(ul);
+            continue;
+          }
+          if (/^\d+\.\s/.test(block)) {
+            const ol = el('ol');
+            for (const line of block.split('\n')) {
+              const m = line.match(/^\d+\.\s+(.+)$/);
+              if (m) ol.appendChild(el('li', null, inlineMd(m[1])));
+            }
+            wrap.appendChild(ol);
+            continue;
+          }
+          wrap.appendChild(el('p', null, inlineMd(block)));
+        }
+        return wrap;
+      }
+
+      function inlineMd(text) {
+        const frag = document.createDocumentFragment();
+        const parts = text.split(/(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[[^\]]+\]\([^)]+\))/g);
+        for (const part of parts) {
+          if (!part) continue;
+          if (part.startsWith('`') && part.endsWith('`')) {
+            frag.appendChild(el('code', null, part.slice(1, -1)));
+          } else if (part.startsWith('**') && part.endsWith('**')) {
+            frag.appendChild(el('strong', null, part.slice(2, -2)));
+          } else if (part.startsWith('*') && part.endsWith('*')) {
+            frag.appendChild(el('em', null, part.slice(1, -1)));
+          } else if (part.startsWith('[') && part.includes('](') && part.endsWith(')')) {
+            const m = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+            if (m) {
+              const a = el('a', null, m[1]);
+              a.href = m[2];
+              a.rel = 'noopener noreferrer';
+              a.target = '_blank';
+              frag.appendChild(a);
+            } else {
+              frag.appendChild(document.createTextNode(part));
+            }
+          } else {
+            frag.appendChild(document.createTextNode(part));
+          }
+        }
+        return frag;
+      }
+
       function logRow(e) {
         if (e.k === 'reasoning' && !state.showReasoning) return null;
 
@@ -1200,14 +1380,37 @@ th {
           const body = el('div', 'body');
           body.appendChild(el('div', 'tool-head', el('span', null, e.tool || 'tool'), el('span', 'badge ' + cls, e.st || '—')));
           if (e.t) body.appendChild(el('div', 'tool-out', e.t));
-          if (e.o) body.appendChild(el('div', 'tool-out', e.o));
+          if (e.o) {
+            const preview = String(e.o).replace(/\s+/g, ' ').trim();
+            const max = 400;
+            if (preview.length > max) {
+              const short = preview.slice(0, max);
+              const out = el('div', 'tool-out', short);
+              const more = el('button', 'log-more', 'show more');
+              more.onclick = () => {
+                out.textContent = preview;
+                more.remove();
+              };
+              out.appendChild(more);
+              body.appendChild(out);
+            } else {
+              body.appendChild(el('div', 'tool-out', preview));
+            }
+          }
           row.appendChild(body);
           return row;
         }
 
         const row = el('div', 'log-row ' + (e.r === 'user' ? 'user' : e.k === 'reasoning' ? 'reasoning' : 'assistant'));
         row.appendChild(el('span', 'who', e.k === 'reasoning' ? 'think' : e.r === 'user' ? 'you' : 'agent'));
-        const body = el('div', 'body', e.t || '');
+        const body = el('div', 'body');
+        if (e.k === 'reasoning') {
+          body.textContent = e.t || '';
+        } else if (e.r === 'user') {
+          body.textContent = e.t || '';
+        } else {
+          body.appendChild(renderMd(e.t || ''));
+        }
         if (e.tr) body.appendChild(el('span', 'clip', ' …clipped'));
         row.appendChild(body);
         return row;
@@ -1623,6 +1826,7 @@ th {
         sessionId: null, model: '', models: [], dirs: [],
         raw: new Map(), order: [], base: [], roles: new Map(),
         es: null, streaming: false, error: null, loading: false, note: '',
+        thinkingStart: null,
       };
 
       // A part event carries no role — only the message event does — and the part
@@ -1630,6 +1834,25 @@ th {
       // render time, by which point the role is known; backfilled entries are
       // already role-tagged and kept separately in `base`.
       const roleOf = (messageID) => (chat.roles.get(messageID) === 'user' ? 'user' : 'assistant');
+
+      // Coalesce renders so N SSE deltas in one frame cause one DOM rebuild.
+      let chatRenderRaf = null;
+
+      function scheduleChatRender() {
+        if (chatRenderRaf !== null) return;
+        chatRenderRaf = requestAnimationFrame(() => {
+          chatRenderRaf = null;
+          renderChat();
+        });
+      }
+
+      function flushChatRender() {
+        if (chatRenderRaf !== null) {
+          cancelAnimationFrame(chatRenderRaf);
+          chatRenderRaf = null;
+        }
+        renderChat();
+      }
 
       const partEntry = (part) => {
         if (!part) return null;
@@ -1641,7 +1864,7 @@ th {
           const snip = s.status === 'error' ? (s.error || s.output) : s.output;
           return {
             r: 'assistant', k: 'tool', tool: part.tool || 'tool', st: s.status || 'unknown',
-            t: s.title || part.tool || '', o: String(snip == null ? '' : snip).replace(/\s+/g, ' ').trim().slice(0, 600),
+            t: s.title || part.tool || '', o: String(snip == null ? '' : snip).replace(/\s+/g, ' ').trim(),
           };
         }
         return null;
@@ -1655,6 +1878,7 @@ th {
         chat.sessionId = sessionId;
         chat.error = null;
         chat.streaming = false;
+        chat.thinkingStart = null;
         if (directory) chat.directory = directory;
       }
 
@@ -1825,6 +2049,7 @@ th {
       function closeStream() {
         if (chat.es) { chat.es.close(); chat.es = null; }
         chat.streaming = false;
+        chat.thinkingStart = null;
       }
 
       function connectStream() {
@@ -1861,19 +2086,24 @@ th {
               break;
             case 'session.status':
               chat.note = p.status && p.status.type ? p.status.type : chat.note;
-              if (p.status?.type === 'busy') chat.streaming = true;
+              if (p.status?.type === 'busy') {
+                chat.streaming = true;
+                if (!chat.thinkingStart) chat.thinkingStart = Date.now();
+              }
               break;
             case 'session.error':
               chat.error = (p.error && (p.error.message || p.error.data?.message)) || 'session error';
+              chat.thinkingStart = null;
               break;
             case 'session.idle':
               chat.streaming = false;
               chat.note = 'idle';
+              chat.thinkingStart = null;
               break;
             default:
               break;
           }
-          renderChat();
+          scheduleChatRender();
         };
         es.onerror = () => {
           // EventSource retries on its own; only surface it so a dead backend is
@@ -1881,7 +2111,7 @@ th {
           if (es.readyState === EventSource.CLOSED) {
             chat.error = 'event stream closed — the chat backend may have stopped';
             chat.streaming = false;
-            renderChat();
+            scheduleChatRender();
           }
         };
       }
@@ -1947,7 +2177,7 @@ th {
           chat.streaming = false;
           box.value = text;
         }
-        renderChat();
+        flushChatRender();
       }
 
       async function stopChat() {
@@ -1960,6 +2190,7 @@ th {
           });
         } catch (e) { chat.error = e.message; }
         chat.streaming = false;
+        chat.thinkingStart = null;
         renderChat();
       }
 
@@ -1984,6 +2215,14 @@ th {
         const rows = entries.map(logRow).filter(Boolean);
         rows.forEach((r) => body.appendChild(r));
         if (rows.length) queueMicrotask(() => { body.scrollTop = body.scrollHeight; });
+
+        if (chat.streaming && chat.thinkingStart) {
+          const last = entries[entries.length - 1];
+          if (last && last.k === 'reasoning') {
+            const secs = Math.floor((Date.now() - chat.thinkingStart) / 1000);
+            body.appendChild(el('div', 'thinking-row', 'thinking\u2026 ' + secs + 's'));
+          }
+        }
 
         const st = $('#chatState');
         st.textContent = chat.loading ? 'connecting' : chat.streaming ? 'working' : chat.sessionId ? 'ready' : 'no session';
