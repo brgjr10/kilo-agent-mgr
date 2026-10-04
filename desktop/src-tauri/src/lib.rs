@@ -145,7 +145,10 @@ fn boot(handle: &tauri::AppHandle) -> Result<Url, String> {
         return Err(format!("{} is missing from the payload", node.display()));
     }
 
-    let port_file = app_dir.join("port.txt");
+    // Per-process, so two windows started at once cannot delete each other's
+    // port file and then both sit waiting for a port that is never rewritten.
+    // The resolved URL is always in backend.log.
+    let port_file = app_dir.join(format!("port-{}.txt", std::process::id()));
     let _ = fs::remove_file(&port_file);
 
     // The backend's stdout/stderr are the only diagnostic available once it is
@@ -176,7 +179,8 @@ fn boot(handle: &tauri::AppHandle) -> Result<Url, String> {
     #[cfg(windows)]
     command.creation_flags(0x08000000); // CREATE_NO_WINDOW: no console flash
 
-    let child = command
+    // mutable because the failure path below kills and reaps it
+    let mut child = command
         .spawn()
         .map_err(|e| format!("could not start {}: {e}", node.display()))?;
 
@@ -189,9 +193,15 @@ fn boot(handle: &tauri::AppHandle) -> Result<Url, String> {
         }
     };
 
-    match BACKEND.lock() {
-        Ok(mut slot) => *slot = Some(child),
-        Err(e) => return Err(format!("backend state was poisoned: {e}")),
+    // On a poisoned lock the child would otherwise be dropped un-killed, leaving a
+    // node process holding a port that nothing will ever reap.
+    if let Err(e) = BACKEND.lock() {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(format!("backend state was poisoned: {e}"));
+    }
+    if let Ok(mut slot) = BACKEND.lock() {
+        *slot = Some(child);
     }
 
     Ok(url)

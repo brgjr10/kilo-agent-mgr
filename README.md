@@ -74,8 +74,9 @@ an MSI or NSIS installer.
 
 At first launch the payload is extracted from the exe into
 `%LOCALAPPDATA%\AgentManager\app\`, which is also where `serve.mjs` writes
-`state.json`, `backend.log` and `port.txt`. That is also the first place to look
-when the app starts but shows the failure page.
+`state.json`, `backend.log` and `port-<pid>.txt`. That is also the first place to
+look when the app starts but shows the failure page — `backend.log` has the URL
+it bound and anything that went wrong.
 
 Two consequences worth knowing:
 
