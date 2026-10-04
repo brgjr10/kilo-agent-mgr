@@ -69,6 +69,19 @@
       background: transparent;
     }
 
+    :focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+
     header {
       position: sticky;
       top: 0;
@@ -1033,6 +1046,14 @@ th {
       opacity: 0.6;
       cursor: not-allowed;
     }
+
+    @media (max-width: 860px) {
+      body.dock-open main { display: none; }
+      aside.dock {
+        width: 100% !important;
+        max-width: 100% !important;
+      }
+    }
   </style>
 </head>
 
@@ -1394,20 +1415,18 @@ th {
           body.appendChild(el('div', 'tool-head', el('span', null, e.tool || 'tool'), el('span', 'badge ' + cls, e.st || '—')));
           if (e.t) body.appendChild(el('div', 'tool-out', e.t));
           if (e.o) {
-            const preview = String(e.o).replace(/\s+/g, ' ').trim();
-            const max = 400;
-            if (preview.length > max) {
-              const short = preview.slice(0, max);
-              const out = el('div', 'tool-out', short);
-              const more = el('button', 'log-more', 'show more');
-              more.onclick = () => {
-                out.textContent = preview;
-                more.remove();
-              };
-              out.appendChild(more);
-              body.appendChild(out);
+            const text = String(e.o).replace(/\s+/g, ' ').trim();
+            if (text.length > 300) {
+              const det = el('details', 'log-more');
+              const sum = el('summary');
+              sum.textContent = text.slice(0, 300) + '…';
+              det.appendChild(sum);
+              const full = el('div', 'tool-out');
+              full.textContent = text;
+              det.appendChild(full);
+              body.appendChild(det);
             } else {
-              body.appendChild(el('div', 'tool-out', preview));
+              body.appendChild(el('div', 'tool-out', text));
             }
           }
           row.appendChild(body);
