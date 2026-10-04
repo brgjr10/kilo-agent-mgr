@@ -14,8 +14,12 @@ name: Build Windows app
 on:
   workflow_dispatch:
   push:
+    branches:
+      - master
     tags:
       - "v*"
+    paths-ignore:
+      - "**/*.md"
   pull_request:
     paths:
       - "desktop/**"
