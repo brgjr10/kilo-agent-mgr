@@ -47,9 +47,10 @@
          tier by the --glass-depth token; JS mints the matching SVG filter. */
       --glass-depth: 10;
 
-      /* Composition of every glass backdrop. --glass-filter stays empty until JS
-         sizes the element and points it at a generated filter. */
-      --glass-blur: blur(16px) saturate(180%) brightness(1.06);
+      /* Composition of the four glass backdrops. A plain blur and nothing else:
+         saturate() and brightness() are each an extra pass over the same pixels
+         for a difference nobody can see against an already-soft bloom. */
+      --glass-blur: blur(12px);
 
       /* Surface tints and inner highlights, as tokens rather than literals, so
          `off` can pin them back to the opaque hexes. A tint written straight into
@@ -70,34 +71,24 @@
     }
 
     /* ---- the liquid ---- */
-    /* Fixed so scrolling the board does not drag the blooms with it, and behind
-       everything so the glass has something to bend. Without this the
-       displacement filter is invisible — refracting a flat fill reads as nothing
-       at all. */
+    /* The liquid — what the glass refracts, and the only thing behind the panels.
+       Fixed so scrolling the board does not drag it with it.
+       Grain is folded into the same layer rather than sitting on a second
+       full-viewport fixed element: two of them meant the whole page composited
+       twice per frame, and wide soft gradients band badly on an 8-bit panel. */
     body::before {
       content: "";
       position: fixed;
       inset: 0;
       z-index: -2;
       pointer-events: none;
-      background:
+      background-image:
+        url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E"),
         radial-gradient(1100px 780px at 10% -12%, rgba(56, 139, 253, 0.26), transparent 62%),
         radial-gradient(940px 700px at 92% -4%, rgba(168, 85, 247, 0.20), transparent 64%),
         radial-gradient(880px 880px at 74% 104%, rgba(45, 212, 191, 0.15), transparent 62%),
-        radial-gradient(760px 620px at 16% 96%, rgba(59, 130, 246, 0.13), transparent 66%),
-        var(--bg-deep);
-    }
-
-    /* Grain. Wide soft gradients band badly on an 8-bit panel, and a flat wash is
-       what makes a glass UI look like frosted plastic rather than glass. */
-    body::after {
-      content: "";
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      opacity: 0.035;
-      background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+        radial-gradient(760px 620px at 16% 96%, rgba(59, 130, 246, 0.13), transparent 66%);
+      background-color: var(--bg-deep);
     }
 
     /* The edge does more work than the refraction. A hairline that goes bright
@@ -270,35 +261,43 @@
         0 14px 32px -20px rgba(0, 0, 0, 0.8);
     }
 
-    /* One backdrop for every glass surface. Individually they differ in tint,
-       radius and edge weight, but the blur/saturate/brightness recipe is the
-       same everywhere — a surface that samples its backdrop differently reads as
-       a different material, which is the one thing a glass UI cannot afford.
+    /* ONE backdrop-filter on this page, and it is only ever on surfaces large enough
+       for the effect to read. Everything below this line — every card, row,
+       badge, chip, keycap, button, field and KPI tile — is pure CSS
+       translucency, and it looks the same, because the bloom behind it is
+       already a soft gradient: there is nothing there worth blurring.
+
+       This is the whole performance story. backdrop-filter is not a cost the
+       compositor amortises across the page — every element that declares one is
+       its own snapshot of the backdrop plus its own blur pass. At 45 of them on
+       a board that repaints every five seconds, the glass was not a finish, it
+       was the frame budget. Four is affordable; sixty is not.
 
        --glass-filter is empty until the liquid-glass script measures the element
        and mints a displacement map sized to it, so this degrades to a plain
        frosted panel with no script at all. */
     header,
-    .kpi,
-    .agent-card,
-    .tree-row,
-    .scroll,
-    .log,
     .dock,
-    .banner,
-    .badge,
-    .chip,
-    .kbd,
-    button,
-    .attach,
-    input[type="search"],
-    input[type="text"],
-    select,
-    textarea,
-    .md code,
-    .md pre.code-block {
+    .scroll,
+    .log {
       -webkit-backdrop-filter: var(--glass-blur) var(--glass-filter, );
       backdrop-filter: var(--glass-blur) var(--glass-filter, );
+    }
+
+    /* The bulk surfaces: skip rendering when they are off screen. This is what
+       makes a 5s poll affordable with glass on it — a card that is not visible
+       costs no backdrop work, no shadow raster and no text layout, so a board
+       with 200 of them only ever pays for the fifteen on screen.
+       contain-intrinsic-size is the placeholder height used while skipped; without
+       it the scrollbar would jump every time a card was skipped or un-skipped. */
+    .agent-card,
+    .tree-row {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 84px;
+    }
+
+    .tree-row {
+      contain-intrinsic-size: auto 27px;
     }
 
     /* Hover lift. The material gets a little brighter and picks up more of the
@@ -1362,6 +1361,7 @@ th {
     <h1><span class="logo-chip"><img class="header-logo" src="assets/logo-outline.png" alt="Kilo Code" height="20"></span><span class="dot" id="liveDot"></span>Agent Manager</h1>
     <span class="meta" id="meta">starting…</span>
     <span class="meta" id="tokenTotal" title="total tokens across tracked sessions"></span>
+    <span class="meta" id="renderCost" title="how long the last repaint took: script cost, then the same repaint including the browser's paint. Reads a few ms when nothing moved."></span>
     <select id="headerDir" title="chat workspace directory" style="max-width:220px"></select>
     <span class="badge" id="headerDirSource" style="margin-right:8px">—</span>
     <select id="catalogTools" title="installed agents, commands, skills and tools" style="max-width:200px"></select>
@@ -1468,7 +1468,7 @@ th {
       const state = {
         data: null, selected: null, query: '', sort: 'updated', desc: true, auto: true,
         showReasoning: true, fullLog: null, logLoading: false, logError: null,
-        glass: 'lite'
+        glass: 'lite', lastRenderMs: 0, paintMs: 0
       };
 
       try { state.auto = localStorage.getItem('am.auto') !== '0'; } catch (e) { /* private mode */ }
@@ -1598,14 +1598,19 @@ th {
         return url;
       }
 
-      /* Size one surface and point it at its filter. Everything else about it —
-       * tint, blur, edge — stays in the stylesheet. */
+/* Size one surface and point it at its filter. Everything else about it —
+         tint, blur, edge — stays in the stylesheet.
+         offsetWidth/offsetHeight rather than getBoundingClientRect: cards carry
+         content-visibility: auto, and a skipped element's rect is empty. offset*
+         falls back to the contain-intrinsic-size placeholder, so a card that is
+         off screen still gets a usable filter in the 'full' tier. */
       function refract(node, depth) {
-        const rect = node.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
+        const width = node.offsetWidth;
+        const height = node.offsetHeight;
+        if (!width || !height) return;
         const radius = parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0;
         node.style.setProperty('--glass-filter',
-          'url("' + glassFilter({ height: rect.height, width: rect.width, radius, depth }) + '")');
+          'url("' + glassFilter({ height, width, radius, depth }) + '")');
       }
 
       function glassTier() {
@@ -1758,7 +1763,7 @@ th {
         ));
 
         card.appendChild(el('div', 'sub',
-          el('span', null, rel(d.updatedAt)),
+          el('span', 'rel-time', rel(d.updatedAt)),
           el('span', null, num(d.tools.total) + ' tools'),
           el('span', null, num(d.messages) + ' msgs'),
           taskTotal(d) ? el('span', null, taskDone(d) + '/' + taskTotal(d) + ' tasks') : null
@@ -1797,9 +1802,110 @@ th {
           el('span', 'badge ' + st.cls, st.label),
           el('span', 'who', d.agent || '?'),
           el('span', 'what', what),
-          el('span', 'badge', rel(d.updatedAt))
+          el('span', 'badge rel-time', rel(d.updatedAt))
         );
         return row;
+      }
+
+      /* ---- repainting the board without rebuilding it ----
+       *
+       * render() runs every 5 seconds. It used to replaceChildren() on the board,
+       * the tree, the table and the detail panel, which meant every card was a
+       * brand new node: no --glass-filter, so it had to be re-measured and
+       * re-layered, and the compositor had to build its backdrop from scratch —
+       * every five seconds, whether or not anything had changed.
+       *
+       * Three changes, cheapest first:
+       *
+       *   1. Reconcile by key. A node whose content signature is unchanged is left
+       *      completely alone, so its layer is never invalidated and a poll where
+       *      nothing moved costs almost nothing.
+       *   2. The detail panel is the most expensive thing on the page — it renders
+       *      the whole transcript — so it is skipped entirely unless the selected
+       *      session's own data changed.
+       *   3. The bulk surfaces lost their backdrop-filter (see the stylesheet), and
+       *      skip rendering when off screen, so the ones that are left are cheap.
+       *
+       * The signatures below list every field the node actually renders. Anything
+       * added to a card later has to be added here too, or it will look stale
+       * until some other field happens to change — that is the whole cost of this
+       * approach and it is not free.
+       */
+
+      const SEP = '';
+
+      function taskSig(t) {
+        return t.state + '/' + (t.subagentType || '') + '/' + (t.description || t.childId || '');
+      }
+
+      function cardSig(d) {
+        return [
+          state.selected === d.id ? 1 : 0,
+          d.title || '', d.agent || '', d.updatedAt || '', d.messages || 0, d.error || '',
+          d.lastToolStatus || '', d.lastTool || '', d.lastText || '',
+          d.tools.total || 0, d.tools.completed || 0, d.tools.error || 0,
+          taskDone(d), taskTotal(d),
+          (d.tasks || []).slice(0, 6).map(taskSig).join(' ')
+        ].join(SEP);
+      }
+
+      function treeSig(d, depth) {
+        return [
+          depth, d.title || '', d.agent || '',
+          d.lastTool || '', d.lastText || '',
+          (d.tasks || []).map(taskSig).join(' ')
+        ].join(SEP);
+      }
+
+      function rowSig(d) {
+        return [
+          state.selected === d.id ? 1 : 0,
+          d.title || d.id, d.agent || '',
+          taskDone(d), taskTotal(d), d.tools.total || 0, d.tokens && d.tokens.input || 0
+        ].join(SEP);
+      }
+
+      /* "4m ago" is a function of the clock, not of the data — so it comes out of
+       * the signatures above and gets patched into the existing nodes instead.
+       * Left in, every row and card would change identity every poll and the
+       * reconciler would be rebuilding the entire board sixty times a minute to
+       * print "5m ago" as "6m ago". */
+      function stamp(node, when) {
+        const text = rel(when);
+        if (node && node.textContent !== text) node.textContent = text;
+      }
+
+      /* The patched clock, in the three places that show one. */
+      const patchStamp = (node, item) => stamp(node.querySelector('.rel-time'), item.d.updatedAt);
+
+      /* Keyed reconciliation: put each item's node in order, reusing the previous
+       * node when its signature is unchanged. Reused nodes are not touched at all,
+       * so a card that did not change keeps its composited layer. */
+      function reconcile(container, items, build, after) {
+        const previous = new Map();
+        for (const node of container.children) {
+          if (node.dataset.k) previous.set(node.dataset.k, node);
+        }
+        let placed = null;
+        for (const item of items) {
+          const old = previous.get(item.key);
+          let node;
+          if (old && old.dataset.sig === item.sig && old.parentNode === container) {
+            previous.delete(item.key);
+            node = old;
+          } else {
+            node = build(item);
+            node.dataset.k = item.key;
+            node.dataset.sig = item.sig;
+          }
+          const next = placed ? placed.nextSibling : container.firstChild;
+          if (node !== next) container.insertBefore(node, next);
+          placed = node;
+          if (after) after(node, item);
+        }
+        for (const node of previous.values()) {
+          if (node.parentNode === container) container.removeChild(node);
+        }
       }
 
       // Small in-house markdown renderer. No deps, no innerHTML on model output.
@@ -2087,10 +2193,7 @@ th {
       function render() {
         const data = state.data;
         if (!data) return;
-        /* render() replaces the cards and rows wholesale, so any filter minted for
-           the previous nodes is gone with them. One frame is enough — the observer
-           on #board / #tree fires on the height change anyway. */
-        requestGlass();
+        const started = performance.now();
 
         const details = (data.details || []).slice();
         const byId = new Map(details.map((d) => [d.id, d]));
@@ -2150,31 +2253,32 @@ th {
         // ---- live board ----
         $('#liveCount').textContent = '(' + live.length + (q ? ' matching "' + q + '"' : '') + ')';
         const board = $('#board');
-        board.replaceChildren();
         if (!live.length) {
-          board.appendChild(el('div', 'empty', q ? 'no live agent matches "' + q + '"' : 'no session details in state.json — run node collector.mjs'));
+          board.replaceChildren(el('div', 'empty', q ? 'no live agent matches "' + q + '"' : 'no session details in state.json — run node collector.mjs'));
         } else {
-          roots.forEach((d) => board.appendChild(agentCard(d, byId)));
-          children.forEach((d) => board.appendChild(agentCard(d, byId)));
+          reconcile(board,
+            roots.concat(children).map((d) => ({ key: d.id, sig: cardSig(d), d })),
+            (item) => agentCard(item.d, byId), patchStamp);
         }
 
         // ---- tree ----
         $('#treeCount').textContent = '(' + roots.length + ' root' + (roots.length === 1 ? '' : 's') + ', ' +
           children.length + ' subagent' + (children.length === 1 ? '' : 's') + ')';
         const tree = $('#tree');
-        tree.replaceChildren();
+        const treeItems = [];
         if (!live.length) {
-          tree.appendChild(el('div', 'empty', 'nothing to map'));
+          tree.replaceChildren(el('div', 'empty', 'nothing to map'));
         } else {
           const emitted = new Set();
           const emit = (d, depth) => {
             if (emitted.has(d.id)) return;
             emitted.add(d.id);
-            tree.appendChild(treeRow(d, depth));
+            treeItems.push({ key: d.id, sig: treeSig(d, depth), d, depth });
             (d.children || []).forEach((cid) => { const c = byId.get(cid); if (c && live.includes(c)) emit(c, depth + 1); });
           };
           roots.forEach((d) => emit(d, 0));
           children.forEach((d) => emit(d, 0)); // orphans keep depth 0 rather than disappearing
+          reconcile(tree, treeItems, (item) => treeRow(item.d, item.depth), patchStamp);
         }
 
         // ---- sessions table ----
@@ -2185,50 +2289,79 @@ th {
           return (x < y ? -1 : x > y ? 1 : 0) * (state.desc ? -1 : 1);
         });
         const tb = $('#sessions').querySelector('tbody');
-        tb.replaceChildren();
         const shown = q ? all.filter((d) => matches(d, q)) : all;
         $('#sessCount').textContent = '(' + shown.length + (q ? ' of ' + all.length : '') + ')';
         if (!shown.length) {
-          tb.appendChild(el('tr', null, el('td', null, el('div', 'empty', 'no sessions match'))));
+          tb.replaceChildren(el('tr', null, el('td', null, el('div', 'empty', 'no sessions match'))));
+        } else {
+          reconcile(tb, shown.map((d) => ({ key: d.id, sig: rowSig(d), d })), (item) => sessionRow(item.d), patchStamp);
         }
-        shown.forEach((d) => {
-          const st = sessionState(d);
-          const tr = el('tr');
-          const titleCell = el('td');
-          const a = el('a', null, d.title || d.id);
-          a.href = '#';
-          a.onclick = (e) => { e.preventDefault(); select(d.id); };
-          titleCell.appendChild(a);
-          titleCell.appendChild(document.createTextNode(' '));
-          titleCell.appendChild(attachButton(d));
-          tr.appendChild(titleCell);
-          tr.appendChild(el('td', 'mono', d.agent || '—'));
-          tr.appendChild(el('td', null, el('span', 'badge ' + st.cls, st.label)));
-          tr.appendChild(el('td', 'num', taskTotal(d) ? taskDone(d) + '/' + taskTotal(d) : '—'));
-          tr.appendChild(el('td', 'num', num(d.tools.total)));
-          tr.appendChild(el('td', 'num', num(d.tokens && d.tokens.input)));
-          tr.appendChild(el('td', 'mono', rel(d.updatedAt)));
-          tr.appendChild(el('td', 'mono', d.id));
-          tr.onclick = (e) => { if (e.target.tagName !== 'A') select(d.id); };
-          if (state.selected === d.id) tr.style.background = '#1f6feb22';
-          tb.appendChild(tr);
-        });
 
         // ---- detail ----
         const sel = state.selected ? byId.get(state.selected) : null;
         $('#detailTitle').textContent = sel ? 'Session detail — ' + (sel.title || sel.id) : 'Session detail (select a card or row)';
-        $('#detail').replaceChildren();
-        if (sel) $('#detail').appendChild(detailPanel(sel));
+        /* The transcript is the most expensive node on the page, so it is rebuilt
+         * only when its inputs actually changed. updatedAt is the collector's
+         * stamp on the export, so an unchanged stamp means unchanged content; the
+         * rest of the key covers the controls that feed logSection. */
+        const detailKey = [
+          sel ? sel.id : '', sel ? sel.updatedAt || 0 : 0,
+          state.fullLog ? state.fullLog.id : '', state.logLoading ? 1 : 0,
+          state.logError ? state.logError.id : '', state.showReasoning ? 1 : 0
+        ].join(SEP);
+        if (detailKey === lastDetailKey) return finishRender(started);
+        lastDetailKey = detailKey;
+        const detail = $('#detail');
+        detail.replaceChildren();
+        if (sel) detail.appendChild(detailPanel(sel));
         else {
-        const empty = el('div', 'empty detail-empty');
-        const img = document.createElement('img');
-        img.className = 'logo-outline';
-        img.src = 'assets/logo-outline.png';
-        img.alt = '';
-        empty.appendChild(img);
-        empty.appendChild(document.createTextNode('click any agent card, tree row, or session title to inspect it here'));
-        $('#detail').appendChild(empty);
+          const empty = el('div', 'empty detail-empty');
+          const img = document.createElement('img');
+          img.className = 'logo-outline';
+          img.src = 'assets/logo-outline.png';
+          img.alt = '';
+          empty.appendChild(img);
+          empty.appendChild(document.createTextNode('click any agent card, tree row, or session title to inspect it here'));
+          detail.appendChild(empty);
+        }
+        finishRender(started);
       }
+
+      let lastDetailKey = null;
+
+      function sessionRow(d) {
+        const st = sessionState(d);
+        const tr = el('tr');
+        const titleCell = el('td');
+        const a = el('a', null, d.title || d.id);
+        a.href = '#';
+        a.onclick = (e) => { e.preventDefault(); select(d.id); };
+        titleCell.appendChild(a);
+        titleCell.appendChild(document.createTextNode(' '));
+        titleCell.appendChild(attachButton(d));
+        tr.appendChild(titleCell);
+        tr.appendChild(el('td', 'mono', d.agent || '—'));
+        tr.appendChild(el('td', null, el('span', 'badge ' + st.cls, st.label)));
+        tr.appendChild(el('td', 'num', taskTotal(d) ? taskDone(d) + '/' + taskTotal(d) : '—'));
+        tr.appendChild(el('td', 'num', num(d.tools.total)));
+        tr.appendChild(el('td', 'num', num(d.tokens && d.tokens.input)));
+        tr.appendChild(el('td', 'mono rel-time', rel(d.updatedAt)));
+        tr.appendChild(el('td', 'mono', d.id));
+        tr.onclick = (e) => { if (e.target.tagName !== 'A') select(d.id); };
+        if (state.selected === d.id) tr.style.background = '#1f6feb22';
+        return tr;
+      }
+
+      /* The cost of a repaint, shown next to the snapshot age. A poll that
+       * changes nothing should sit at a few ms; one that rebuilds the board jumps
+       * to hundreds. It is here so the claim is checkable rather than asserted. */
+      function finishRender(started) {
+        state.lastRenderMs = performance.now() - started;
+        requestGlass();
+        requestAnimationFrame(() => {
+          state.paintMs = performance.now() - started;
+          $('#renderCost').textContent = '· paint ' + state.paintMs.toFixed(0) + 'ms';
+        });
       }
 
       let timer = null;

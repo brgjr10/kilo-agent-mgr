@@ -1,6 +1,6 @@
 [package]
 name = "agent-manager"
-version = "1.0.4"
+version = "1.0.5"
 description = "Agent Manager — live Kilo agent dashboard with a chat window"
 authors = ["Brodie Grant"]
 edition = "2021"

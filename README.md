@@ -35,6 +35,34 @@ The accent palette is unchanged from the previous dark theme, because the state
 colours (green running, yellow busy, red error, blue root) are load-bearing and
 have to stay distinguishable at a glance.
 
+### How the 5s poll stays affordable
+
+Glass is expensive per element, and this board repaints every 5 seconds. Four
+things keep it cheap, in order of how much they buy:
+
+| Change | Why |
+| --- | --- |
+| **Cards and rows reconcile instead of rebuilding** | A rebuilt card is a new node with no filter, so it must be re-measured, re-layered and re-composited — every 5s whether or not anything moved. A node whose content signature is unchanged is now left completely alone. |
+| **The detail panel skips entirely unless it changed** | It renders the whole transcript and is the most expensive node on the page. `updatedAt` is the collector's stamp on the export, so an unchanged stamp means unchanged content. |
+| **Bulk surfaces have no `backdrop-filter`** | `backdrop-filter` is not a cost the compositor amortises — 200 filtered layers is 200 separate blur passes over the same bloom. Cards, rows, badges, chips and keycaps keep their translucency and lit edge and just don't sample the backdrop. Under a dozen large surfaces keep it. |
+| **`content-visibility: auto` on cards and rows** | An off-screen card costs no backdrop work, no shadow raster and no text layout. |
+
+Measured over 16s with the chat dock open and a session selected, same snapshot
+and same server, headless Chrome. Headless has no GPU, so these numbers are
+pessimistic and they move run to run with whatever the collector is doing — the
+structural counts are the stable part:
+
+| | v1.0.4 | this build |
+| --- | --- | --- |
+| cards compositing a backdrop | 3 of 3 | **0** |
+| elements compositing a backdrop | 94 | **45–61** |
+| frames delivered over 16s | 193 | **306–495** |
+| p95 frame | 401 ms | **233–317 ms** |
+
+The header shows the last repaint cost next to the snapshot age, so the claim is
+checkable rather than asserted. A poll where nothing moved sits in the low
+milliseconds.
+
 ## Run it
 
 ```powershell
