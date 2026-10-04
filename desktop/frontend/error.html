@@ -1,10 +1,33 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-glass="lite">
 
 <head>
   <meta charset="utf-8">
   <title>Agent Manager — backend failed to start</title>
   <style>
+    /* Same tokens as the dashboard and the splash. The red stays a border and a
+       heading rather than a flood: the page has to stay readable enough to paste
+       a log out of it. */
+    :root {
+      --bg-deep: #05070b;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --red: #f85149;
+      --red-dim: #f8514955;
+      --banner-fg: #ffb4ae;
+      --border: rgba(255, 255, 255, 0.11);
+      --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.13),
+        inset 0 0 1px 0 rgba(255, 255, 255, 0.09),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+        0 1px 2px rgba(0, 0, 0, 0.34),
+        0 10px 26px -14px rgba(0, 0, 0, 0.62);
+      --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
       min-height: 100vh;
@@ -13,57 +36,111 @@
       align-items: center;
       justify-content: center;
       gap: 12px;
-      background: #0d1117;
-      color: #e6edf3;
+      background: var(--bg-deep);
+      color: var(--text);
       font: 13px/1.6 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       padding: 32px;
     }
 
+    /* the liquid */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      background:
+        radial-gradient(1100px 780px at 12% -10%, rgba(248, 81, 73, 0.20), transparent 62%),
+        radial-gradient(940px 700px at 90% -4%, rgba(168, 85, 247, 0.16), transparent 64%),
+        radial-gradient(880px 880px at 70% 104%, rgba(45, 212, 191, 0.13), transparent 62%),
+        var(--bg-deep);
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
     .card {
       max-width: 46em;
-      background: #161b22;
-      border: 1px solid #f8514955;
-      border-radius: 8px;
+      border: 1px solid var(--red-dim);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(248, 81, 73, 0.15), rgba(248, 81, 73, 0.06));
+      box-shadow: var(--glass-edge);
+      -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(1.06);
+      backdrop-filter: blur(16px) saturate(180%) brightness(1.06);
       padding: 18px 20px;
+    }
+
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .card {
+        background: #161b22;
+      }
     }
 
     h1 {
       font-size: 15px;
       margin: 0 0 10px;
-      color: #ffb4ae;
+      color: var(--banner-fg);
     }
 
     p {
       margin: 0 0 10px;
-      color: #8b949e;
+      color: var(--muted);
     }
 
     code,
     pre {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
-      color: #e6edf3;
+      color: var(--text);
+    }
+
+    code {
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 5px;
+      padding: 1px 5px;
+      box-shadow: var(--glass-inner);
     }
 
     pre {
-      background: #0d1117;
-      border: 1px solid #30363d;
-      border-radius: 6px;
+      background: rgba(6, 9, 14, 0.55);
+      border: 1px solid var(--border);
+      border-radius: 9px;
       padding: 10px;
       white-space: pre-wrap;
       word-break: break-word;
       max-height: 34vh;
       overflow: auto;
+      box-shadow: var(--glass-inner);
     }
 
     ul {
       margin: 0;
       padding-left: 20px;
-      color: #8b949e;
+      color: var(--muted);
     }
 
     li {
       margin-bottom: 4px;
+    }
+
+    @media (prefers-reduced-transparency: reduce) {
+      body::before,
+      body::after {
+        display: none;
+      }
+
+      .card {
+        background: #161b22;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
     }
   </style>
 </head>

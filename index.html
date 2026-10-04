@@ -7,13 +7,23 @@
   <title>Agent Manager</title>
   <link rel="icon" href="assets/logo-mark.png">
   <style>
-    /* GitHub dark palette — the house theme for ops tooling. */
+    /* GitHub dark palette, kept for the accents — the state colours are load-bearing
+       and must stay distinguishable at a glance. The surfaces are now liquid glass:
+       translucent panels over an ambient bloom, so the palette reads *through* the
+       glass instead of being painted on top of it. */
     :root {
-      --bg: #0d1117;
-      --card: #161b22;
-      --card2: #1c2129;
-      --border: #30363d;
-      --row: #21262d;
+      /* the liquid: what the glass refracts. --bg-deep is the unlit base. */
+      --bg-deep: #05070b;
+      --bg: #0a0e14;
+      --card: rgba(255, 255, 255, 0.05);
+      --card2: rgba(255, 255, 255, 0.085);
+      --border: rgba(255, 255, 255, 0.11);
+      --row: rgba(255, 255, 255, 0.035);
+
+      /* Fields and scrollports need more body than a panel does, or the bloom shows
+         through the glyphs. */
+      --inset: rgba(6, 9, 14, 0.55);
+      --sticky: rgba(9, 13, 19, 0.88);
 
       --blue: #58a6ff;
       --green: #3fb950;
@@ -32,6 +42,163 @@
       --banner-fg: #ffb4ae;
 
       --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+      /* refraction depth, in px, of the generated displacement map. Overridden per
+         tier by the --glass-depth token; JS mints the matching SVG filter. */
+      --glass-depth: 10;
+
+      /* Composition of every glass backdrop. --glass-filter stays empty until JS
+         sizes the element and points it at a generated filter. */
+      --glass-blur: blur(16px) saturate(180%) brightness(1.06);
+
+      /* Surface tints and inner highlights, as tokens rather than literals, so
+         `off` can pin them back to the opaque hexes. A tint written straight into
+         a rule is a tint the off tier cannot reach. */
+      --glass-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.032));
+      --glass-fill-head: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+      --glass-fill-raised: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.045));
+      --glass-fill-row: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.028));
+      --glass-fill-flat: rgba(255, 255, 255, 0.06);
+      --glass-fill-chrome: rgba(6, 9, 14, 0.5);
+      --glass-fill-well: rgba(6, 9, 14, 0.42);
+      --glass-fill-deep: rgba(6, 9, 14, 0.55);
+      --glass-hairline: rgba(255, 255, 255, 0.055);
+      --glass-groove: rgba(255, 255, 255, 0.07);
+      --glass-inner: inset 0 1px 0 rgba(255, 255, 255, 0.09);
+      --glass-inset: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+      --glass-inset-deep: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+    }
+
+    /* ---- the liquid ---- */
+    /* Fixed so scrolling the board does not drag the blooms with it, and behind
+       everything so the glass has something to bend. Without this the
+       displacement filter is invisible — refracting a flat fill reads as nothing
+       at all. */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      background:
+        radial-gradient(1100px 780px at 10% -12%, rgba(56, 139, 253, 0.26), transparent 62%),
+        radial-gradient(940px 700px at 92% -4%, rgba(168, 85, 247, 0.20), transparent 64%),
+        radial-gradient(880px 880px at 74% 104%, rgba(45, 212, 191, 0.15), transparent 62%),
+        radial-gradient(760px 620px at 16% 96%, rgba(59, 130, 246, 0.13), transparent 66%),
+        var(--bg-deep);
+    }
+
+    /* Grain. Wide soft gradients band badly on an 8-bit panel, and a flat wash is
+       what makes a glass UI look like frosted plastic rather than glass. */
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    /* The edge does more work than the refraction. A hairline that goes bright
+       where a light would catch it and dark where it would not is what sells the
+       material; --glass-edge is reused verbatim by every surface below so they
+       stay one material instead of a set of lookalikes. */
+    :root {
+      --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.13),
+        inset 0 0 1px 0 rgba(255, 255, 255, 0.09),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+        0 1px 2px rgba(0, 0, 0, 0.34),
+        0 10px 26px -14px rgba(0, 0, 0, 0.62);
+      --glass-lift: 0 1px 0 rgba(255, 255, 255, 0.08),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    }
+
+    /* Off: opaque panels, no backdrop-filter. Not just an accessibility escape
+       hatch — this is the tier for machines where a filtered backdrop costs more
+       than the effect is worth, and it is what `Glass` in the header falls back to. */
+    html[data-glass="off"] {
+      --bg: #0d1117;
+      --card: #161b22;
+      --card2: #1c2129;
+      --border: #30363d;
+      --row: #21262d;
+      --inset: #0d1117;
+      --sticky: #0d1117;
+      --glass-blur: none;
+      --glass-edge: none;
+      --glass-lift: none;
+      --glass-fill: #161b22;
+      --glass-fill-head: #0d1117;
+      --glass-fill-raised: #1c2129;
+      --glass-fill-row: #161b22;
+      --glass-fill-flat: #1c2129;
+      --glass-fill-chrome: #0d1117;
+      --glass-fill-well: #0d1117;
+      --glass-fill-deep: #0d1117;
+      --glass-hairline: #21262d;
+      --glass-groove: #21262d;
+      --glass-inner: none;
+      --glass-inset: none;
+      --glass-inset-deep: none;
+    }
+
+    html[data-glass="off"] body::before,
+    html[data-glass="off"] body::after {
+      display: none;
+    }
+
+    /* Ask for glass to be dropped: transparency this expensive is a legibility
+       problem for some people, not a preference. */
+    @media (prefers-reduced-transparency: reduce) {
+      html:not([data-glass="full"]) {
+        --card: #161b22;
+        --card2: #1c2129;
+        --border: #30363d;
+        --row: #21262d;
+        --inset: #0d1117;
+        --sticky: #0d1117;
+        --glass-blur: none;
+        --glass-edge: none;
+        --glass-lift: none;
+        --glass-fill: #161b22;
+        --glass-fill-head: #0d1117;
+        --glass-fill-raised: #1c2129;
+        --glass-fill-row: #161b22;
+        --glass-fill-flat: #1c2129;
+        --glass-fill-chrome: #0d1117;
+        --glass-fill-well: #0d1117;
+        --glass-fill-deep: #0d1117;
+        --glass-hairline: #21262d;
+        --glass-groove: #21262d;
+        --glass-inner: none;
+        --glass-inset: none;
+        --glass-inset-deep: none;
+      }
+
+      html:not([data-glass="full"]) body::before,
+      html:not([data-glass="full"]) body::after {
+        display: none;
+      }
+    }
+
+    /* Forced colours: the OS is painting every surface itself and translucency is
+       not available, so stop pretending. */
+    @media (forced-colors: active) {
+      body::before,
+      body::after {
+        display: none;
+      }
+
+      .kpi,
+      .agent-card,
+      .tree-row,
+      .dock,
+      .scroll,
+      .log,
+      header {
+        backdrop-filter: none;
+      }
     }
 
     * {
@@ -45,9 +212,10 @@
     }
 
     body {
-      background: var(--bg);
+      background: var(--bg-deep);
       color: var(--text);
       font: 13px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
     }
 
     a {
@@ -60,9 +228,10 @@
     }
 
     ::-webkit-scrollbar-thumb {
-      background: var(--row);
+      background: rgba(255, 255, 255, 0.14);
       border-radius: 6px;
-      border: 2px solid var(--bg);
+      border: 2px solid transparent;
+      background-clip: padding-box;
     }
 
     ::-webkit-scrollbar-track {
@@ -82,6 +251,9 @@
       }
     }
 
+    /* The one surface that always sits over the bloom, so it is the one that always
+       shows the effect. Sticky, full width and never more than a few hundred
+       pixels of filter — cheap enough to refract on every board repaint. */
     header {
       position: sticky;
       top: 0;
@@ -91,9 +263,90 @@
       gap: 12px;
       flex-wrap: wrap;
       padding: 10px 16px;
-      background: rgba(13, 17, 23, 0.92);
-      backdrop-filter: blur(8px);
+      background: var(--glass-fill-head);
       border-bottom: 1px solid var(--border);
+      box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+        0 1px 0 rgba(0, 0, 0, 0.35),
+        0 14px 32px -20px rgba(0, 0, 0, 0.8);
+    }
+
+    /* One backdrop for every glass surface. Individually they differ in tint,
+       radius and edge weight, but the blur/saturate/brightness recipe is the
+       same everywhere — a surface that samples its backdrop differently reads as
+       a different material, which is the one thing a glass UI cannot afford.
+
+       --glass-filter is empty until the liquid-glass script measures the element
+       and mints a displacement map sized to it, so this degrades to a plain
+       frosted panel with no script at all. */
+    header,
+    .kpi,
+    .agent-card,
+    .tree-row,
+    .scroll,
+    .log,
+    .dock,
+    .banner,
+    .badge,
+    .chip,
+    .kbd,
+    button,
+    .attach,
+    input[type="search"],
+    input[type="text"],
+    select,
+    textarea,
+    .md code,
+    .md pre.code-block {
+      -webkit-backdrop-filter: var(--glass-blur) var(--glass-filter, );
+      backdrop-filter: var(--glass-blur) var(--glass-filter, );
+    }
+
+    /* Hover lift. The material gets a little brighter and picks up more of the
+       backdrop rather than gaining a border — a border would read as a state
+       change, and this is not one. */
+    .agent-card:hover,
+    .tree-row:hover,
+    button:hover:not(:disabled),
+    .attach:hover {
+      background: var(--glass-fill-raised);
+      border-color: var(--blue);
+    }
+
+    /* The header and dock <select>s never had a background of their own, so they
+       were painting with the UA's light form control — a white slab in a dark
+       bar. They are glass like every other field now, which also puts their
+       dropdowns on the theme. */
+    select {
+      appearance: none;
+      background: var(--inset);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 5px 22px 5px 9px;
+      font: inherit;
+      font-size: 11px;
+      font-family: var(--mono);
+      box-shadow: var(--glass-lift), var(--glass-inset);
+      /* the chevron is drawn rather than inherited, so it does not arrive as a
+         black glyph on a dark field */
+      background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b949e' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 7px center;
+      cursor: pointer;
+    }
+
+    select:hover {
+      border-color: var(--blue);
+    }
+
+    select:focus {
+      outline: none;
+      border-color: var(--blue);
+    }
+
+    select option {
+      background: #12161d;
+      color: var(--text);
     }
 
     header h1 {
@@ -192,14 +445,15 @@
 
     input[type="search"],
     input[type="text"] {
-      background: var(--bg);
+      background: var(--inset);
       border: 1px solid var(--border);
       color: var(--text);
-      border-radius: 6px;
+      border-radius: 7px;
       padding: 5px 9px;
       font: inherit;
       font-size: 12px;
       min-width: 210px;
+      box-shadow: var(--glass-lift), var(--glass-inset);
     }
 
     input[type="search"]:focus,
@@ -209,20 +463,24 @@
     }
 
     button {
-      background: var(--card2);
+      background: var(--glass-fill-raised);
       color: var(--text);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 7px;
       padding: 5px 11px;
       font: inherit;
       font-size: 12px;
       cursor: pointer;
-      transition: border-color 0.12s, background 0.12s;
+      box-shadow: var(--glass-lift);
+      transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
     }
 
-    button:hover:not(:disabled) {
-      border-color: var(--blue);
-      background: var(--row);
+    /* A pressed control sits *into* the glass: the top highlight inverts and the
+       shadow tightens. Only affordance, no colour change — the pressed state is
+       already carried by aria-pressed and the .on/.blue tint. */
+    button:active:not(:disabled) {
+      background: var(--glass-fill-row);
+      box-shadow: var(--glass-inset);
     }
 
     button:disabled {
@@ -248,14 +506,15 @@
 
     .banner {
       border: 1px solid var(--red);
-      background: rgba(248, 81, 73, 0.1);
+      background: linear-gradient(180deg, rgba(248, 81, 73, 0.16), rgba(248, 81, 73, 0.07));
       color: var(--banner-fg);
-      border-radius: 8px;
+      border-radius: 10px;
       padding: 10px 12px;
       margin-bottom: 14px;
       font-family: var(--mono);
       font-size: 12px;
       white-space: pre-wrap;
+      box-shadow: var(--glass-edge);
     }
 
     /* Not everything shown in the banner is a failure. A first run has no
@@ -263,7 +522,7 @@
        reads as a broken install. */
     .banner.info {
       border-color: var(--blue);
-      background: rgba(88, 166, 255, 0.1);
+      background: linear-gradient(180deg, rgba(88, 166, 255, 0.15), rgba(88, 166, 255, 0.06));
       color: var(--blue);
     }
 
@@ -275,10 +534,11 @@
     }
 
     .kpi {
-      background: var(--card);
+      background: var(--glass-fill);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 12px;
       padding: 10px 12px;
+      box-shadow: var(--glass-edge);
     }
 
     .kpi .label {
@@ -338,17 +598,20 @@
     }
 
     .agent-card {
-      background: var(--card);
+      background: var(--glass-fill);
       border: 1px solid var(--border);
+      /* the state stripe stays a solid 3px bar: it is the fastest read on the
+         board and a translucent one would lose its edge against the bloom */
       border-left: 3px solid var(--muted);
-      border-radius: 8px;
+      border-radius: 12px;
       padding: 10px 12px;
       cursor: pointer;
-      transition: border-color 0.12s;
+      box-shadow: var(--glass-edge);
+      transition: border-color 0.12s, background 0.12s, box-shadow 0.12s;
     }
 
     .agent-card:hover {
-      border-color: var(--blue);
+      box-shadow: var(--glass-edge), 0 0 0 1px var(--blue-dim);
     }
 
     .agent-card:focus-visible {
@@ -356,8 +619,11 @@
       outline-offset: 2px;
     }
 
+    /* Selected: a blue rim rather than a colour fill, so the card underneath
+       still shows what it says. */
     .agent-card.sel {
-      box-shadow: 0 0 0 1px var(--blue);
+      border-color: var(--blue);
+      box-shadow: var(--glass-edge), 0 0 0 1px var(--blue), 0 0 18px -4px rgba(88, 166, 255, 0.4);
     }
 
     .agent-card.running {
@@ -415,9 +681,10 @@
       padding: 1px 6px;
       border-radius: 10px;
       border: 1px solid var(--border);
-      background: var(--card2);
+      background: var(--glass-fill-flat);
       color: var(--muted);
       white-space: nowrap;
+      box-shadow: var(--glass-inner);
     }
 
     .badge.blue {
@@ -442,10 +709,12 @@
 
     .bar {
       height: 5px;
-      background: var(--row);
+      /* a track, not a glass pill — it reads as a groove the fill sits in */
+      background: var(--glass-groove);
       border-radius: 3px;
       overflow: hidden;
       margin: 6px 0;
+      box-shadow: var(--glass-inset);
     }
 
     .bar>i {
@@ -484,13 +753,15 @@
       font-size: 10px;
       font-family: var(--mono);
       padding: 1px 6px;
-      border-radius: 4px;
+      border-radius: 6px;
       border: 1px solid var(--border);
+      background: var(--glass-fill-flat);
       color: var(--muted);
       max-width: 190px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      box-shadow: var(--glass-inner);
     }
 
     .chip.completed {
@@ -519,14 +790,12 @@
       align-items: center;
       gap: 8px;
       padding: 5px 10px;
-      background: var(--card);
+      background: var(--glass-fill-row);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 9px;
       cursor: pointer;
-    }
-
-    .tree-row:hover {
-      border-color: var(--blue);
+      box-shadow: var(--glass-lift);
+      transition: border-color 0.12s, background 0.12s;
     }
 
     .tree-row .indent {
@@ -570,19 +839,29 @@ th {
       position: sticky;
       top: 0;
       z-index: 1;
-      background: var(--bg);
+      /* Opaque enough to hide the rows sliding under it even where
+         backdrop-filter is unavailable — a sticky header you can read through is
+         worse than no blur. */
+      background: var(--sticky);
+      -webkit-backdrop-filter: blur(10px);
+      backdrop-filter: blur(10px);
       cursor: pointer;
       white-space: nowrap;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 var(--border);
     }
 
     td {
       padding: 5px 8px;
-      border-bottom: 1px solid var(--row);
+      border-bottom: 1px solid var(--glass-hairline);
       vertical-align: middle;
     }
 
     tbody tr:hover {
-      background: var(--card);
+      background: var(--glass-fill-flat);
+    }
+
+    tbody tr {
+      transition: background 0.1s;
     }
 
     td.mono,
@@ -601,8 +880,11 @@ th {
       max-height: 560px;
       overflow: auto;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--bg);
+      border-radius: 12px;
+      /* translucent, so the bloom still reaches the rows — but with far more
+         body than a card, because this is where the dense text lives */
+      background: var(--glass-fill-well);
+      box-shadow: var(--glass-edge);
     }
 
     /* the detail panel always spans the full board width */
@@ -629,10 +911,12 @@ th {
 
     .kbd {
       border: 1px solid var(--border);
-      border-radius: 4px;
+      border-radius: 5px;
       padding: 0 4px;
       font-family: var(--mono);
       font-size: 10px;
+      background: var(--glass-fill-flat);
+      box-shadow: var(--glass-inner);
     }
 
     /* transcript log */
@@ -656,9 +940,10 @@ th {
       max-height: 520px;
       overflow: auto;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--bg);
+      border-radius: 12px;
+      background: var(--glass-fill-well);
       padding: 8px;
+      box-shadow: var(--glass-edge);
     }
 
     .log-row {
@@ -699,7 +984,7 @@ th {
 
     .log-row.tool {
       border-left-color: var(--border);
-      background: var(--card);
+      background: var(--glass-fill-flat);
     }
 
     .log-row.tool .who {
@@ -787,18 +1072,20 @@ th {
     .md code {
       font-family: var(--mono);
       font-size: 11px;
-      background: var(--card2);
+      background: var(--glass-fill-flat);
       padding: 1px 5px;
-      border-radius: 4px;
+      border-radius: 5px;
+      box-shadow: var(--glass-inner);
     }
     .md pre.code-block {
       margin: 6px 0;
       padding: 8px 10px;
-      background: var(--card);
+      background: var(--glass-fill-deep);
       border: 1px solid var(--border);
-      border-radius: 6px;
+      border-radius: 9px;
       overflow: auto;
       position: relative;
+      box-shadow: var(--glass-inner);
     }
     .md .code-lang {
       position: absolute;
@@ -847,7 +1134,12 @@ th {
     /* ---- chat dock ---- */
     /* Fixed right-hand panel rather than another section in the page: the board,
        tree and table are all full-width grids, and a docked panel leaves them
-       readable while a chat scrolls beside them. */
+       readable while a chat scrolls beside them.
+
+       This is the tallest glass surface in the app and the second most visible
+       one, so it carries the full effect: a real refraction edge, and a heavier
+       tint than a card because a chat transcript needs more contrast than a
+       status card does. */
     .dock {
       position: fixed;
       top: 0;
@@ -857,9 +1149,11 @@ th {
       z-index: 40;
       display: none;
       flex-direction: column;
-      background: var(--card);
+      background: var(--glass-fill-head);
       border-left: 1px solid var(--border);
-      box-shadow: -12px 0 32px rgba(1, 4, 9, 0.5);
+      box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.1),
+        -1px 0 0 rgba(0, 0, 0, 0.5),
+        -22px 0 48px -18px rgba(0, 0, 0, 0.75);
     }
 
     body.dock-open .dock {
@@ -897,8 +1191,11 @@ th {
       gap: 8px;
       padding: 9px 12px;
       border-bottom: 1px solid var(--border);
-      background: var(--bg);
+      background: var(--glass-fill-chrome);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
       flex-wrap: wrap;
+      box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.3);
     }
 
     .dock-head h2 {
@@ -919,18 +1216,21 @@ th {
       flex-wrap: wrap;
     }
 
+    /* Font and sizing only — the field treatment (background, edge, chevron) comes
+       from the shared field rules above, so the dock and the header do not end
+       up with two different looking selects. */
     .dock-bar select,
     .dock-bar input[type="text"] {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      border-radius: 6px;
       padding: 4px 7px;
       font: inherit;
       font-size: 11px;
       font-family: var(--mono);
       min-width: 0;
       max-width: 100%;
+    }
+
+    .dock-bar select {
+      padding-right: 22px;
     }
 
     .dock-bar select:focus,
@@ -978,7 +1278,10 @@ th {
     .dock-foot {
       border-top: 1px solid var(--border);
       padding: 8px 10px;
-      background: var(--bg);
+      background: var(--glass-fill-chrome);
+      -webkit-backdrop-filter: blur(14px);
+      backdrop-filter: blur(14px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
 
     .dock-foot textarea {
@@ -986,13 +1289,14 @@ th {
       min-height: 62px;
       max-height: 190px;
       resize: vertical;
-      background: var(--bg);
+      background: var(--inset);
       border: 1px solid var(--border);
       color: var(--text);
-      border-radius: 6px;
+      border-radius: 8px;
       padding: 7px 9px;
       font: inherit;
       font-size: 12px;
+      box-shadow: var(--glass-lift), var(--glass-inset-deep);
     }
 
     .dock-foot textarea:focus {
@@ -1020,27 +1324,23 @@ th {
     /* Per-row shortcut that opens the dock already attached to that session. */
     .attach {
       border: 1px solid var(--border);
-      background: var(--card2);
+      background: var(--glass-fill-flat);
       color: var(--blue);
-      border-radius: 5px;
+      border-radius: 6px;
       padding: 0 6px;
       font-family: var(--mono);
       font-size: 10px;
       cursor: pointer;
       line-height: 17px;
-    }
-
-    .attach:hover {
-      border-color: var(--blue);
-      background: var(--row);
+      box-shadow: var(--glass-lift);
     }
 
     #resetBoard {
       color: var(--red);
       border-color: var(--red-dim);
     }
-    #resetBoard:hover {
-      background: rgba(248, 81, 73, 0.08);
+    #resetBoard:hover:not(:disabled) {
+      background: rgba(248, 81, 73, 0.14);
     }
     #resetBoard:disabled {
       opacity: 0.6;
@@ -1070,6 +1370,7 @@ th {
     <button id="autoBtn" aria-pressed="true" title="poll state.json every 5s">Auto 5s</button>
     <button id="refresh" title="refresh now ( r )">Refresh</button>
     <button id="chatToggle" aria-pressed="false" title="open the chat window ( c )">Chat</button>
+    <button id="glassToggle" title="glass refraction: full (every panel), lite (header, KPIs and the chat dock only), off (opaque panels)">Glass</button>
     <button id="resetBoard" title="clear state.json and cache, board goes empty until next collect">Reset board</button>
   </header>
   <main>
@@ -1157,13 +1458,220 @@ th {
         return n;
       };
 
+      /* Glass tiers, in toggle order. See initGlass for what each one does. */
+      const GLASS_TIERS = ['full', 'lite', 'off'];
+      const GLASS_DEPTH = { full: 12, lite: 10 };
+      /* The only surfaces that refract in the default tier: big, few, and always
+       * sitting over the bloom. Everything else is blur-only until 'full'. */
+      const GLASS_LIT = ['header', '.kpi', '.dock'];
+
       const state = {
         data: null, selected: null, query: '', sort: 'updated', desc: true, auto: true,
-        showReasoning: true, fullLog: null, logLoading: false, logError: null
+        showReasoning: true, fullLog: null, logLoading: false, logError: null,
+        glass: 'lite'
       };
 
       try { state.auto = localStorage.getItem('am.auto') !== '0'; } catch (e) { /* private mode */ }
       try { state.showReasoning = localStorage.getItem('am.reasoning') !== '0'; } catch (e) { /* private mode */ }
+      try {
+        const saved = localStorage.getItem('am.glass');
+        if (GLASS_TIERS.indexOf(saved) >= 0) state.glass = saved;
+      } catch (e) { /* private mode */ }
+
+      /* ---- liquid glass ----
+       *
+       * Refraction ported from github.com/nikdelvin/liquid-glass (MIT). See
+       * NOTICE.txt. The idea is a displacement map rather than a blur: an SVG is
+       * generated with grey in the middle and a ramp toward the corners, fed to
+       * feDisplacementMap, and the result is that the backdrop bends at the edge
+       * of a surface and stays flat in the middle — which is what glass actually
+       * does, and what a plain backdrop-filter cannot fake.
+       *
+       * Three adaptations, all because this board repaints every few seconds and
+       * can hold 200 agent cards where the upstream page holds four panels:
+       *
+       *   1. One filter per size bucket instead of one per element. Upstream
+       *      regenerates the filter data-URI for every glass element it
+       *      measures. Cards in a CSS grid are all the same size, so a 24px
+       *      bucket turns 200 filter builds into one.
+       *   2. Two tiers. Only the few big surfaces refract by default ('lite');
+       *      'full' turns it on everywhere for machines with the GPU headroom.
+       *   3. Feature detection. Where backdrop-filter: url() is unsupported
+       *      (WebKit), the CSS alone still gives a frosted panel — no filter is
+       *      generated and nothing throws.
+       */
+
+      /* Refracting surfaces, grouped by the container that owns their size. `own` marks
+       the case where the container is itself the surface. The grid containers are
+       the cheap ones to watch: their children are uniform, so one measurement
+       sizes the lot. */
+      const GLASS_GROUPS = [
+        { root: 'header', own: true, nodes: 'header' },
+        { root: '#kpis', own: false, nodes: '.kpi' },
+        { root: '#board', own: false, nodes: '.agent-card' },
+        { root: '#detail', own: false, nodes: '.agent-card' },
+        { root: '#tree', own: false, nodes: '.tree-row' },
+        { root: '.scroll', own: true, nodes: '.scroll' },
+        { root: '.log', own: true, nodes: '.log' },
+        { root: '#dock', own: true, nodes: '.dock' }
+      ];
+
+      /* Set on every element by the shared rule in the stylesheet; the script
+       * only fills it in once it knows how big the element is. */
+      const supportsBackdropUrl = (() => {
+        const probe = document.createElement('div');
+        probe.style.cssText = 'backdrop-filter: url(#lg-probe)';
+        const value = probe.style.backdropFilter || probe.style.webkitBackdropFilter || '';
+        return /^url\(|"\s*url\(/.test(value);
+      })();
+
+      /* feDisplacementMap samples the red and green channels as displacement, so
+       * the map is a grey rectangle with a red ramp across x and a green ramp
+       * down y, blended back to grey under the rounded interior. */
+      function displacementMapSvg(height, width, radius, depth) {
+        return '<svg height="' + height + '" width="' + width +
+          '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg">' +
+          '<style>.mix{mix-blend-mode:screen}</style>' +
+          '<defs>' +
+          '<linearGradient id="Y" x1="0" x2="0" y1="' + Math.ceil((radius / height) * 15) +
+          '%" y2="' + Math.floor(100 - (radius / height) * 15) + '%">' +
+          '<stop offset="0%" stop-color="#0F0"/><stop offset="100%" stop-color="#000"/></linearGradient>' +
+          '<linearGradient id="X" x1="' + Math.ceil((radius / width) * 15) +
+          '%" x2="' + Math.floor(100 - (radius / width) * 15) + '%" y1="0" y2="0">' +
+          '<stop offset="0%" stop-color="#F00"/><stop offset="100%" stop-color="#000"/></linearGradient>' +
+          '</defs>' +
+          '<rect x="0" y="0" height="' + height + '" width="' + width + '" fill="#808080"/>' +
+          '<g filter="blur(2px)">' +
+          '<rect x="0" y="0" height="' + height + '" width="' + width + '" fill="#000080"/>' +
+          '<rect x="0" y="0" height="' + height + '" width="' + width + '" fill="url(#Y)" class="mix"/>' +
+          '<rect x="0" y="0" height="' + height + '" width="' + width + '" fill="url(#X)" class="mix"/>' +
+          '<rect x="' + depth + '" y="' + depth + '" height="' + (height - 2 * depth) +
+          '" width="' + (width - 2 * depth) + '" fill="#808080" rx="' + radius + '" ry="' + radius +
+          '" filter="blur(' + depth + 'px)"/>' +
+          '</g></svg>';
+      }
+
+      /* Three displacement passes blended with screen, one per channel: the red
+       * pass is pushed furthest, then green, then blue. That per-channel spread
+       * is the chromatic aberration — the coloured fringing at the rim. */
+      function displacementFilterSvg(opts) {
+        const { height, width, radius, depth, strength, chromaticAberration } = opts;
+        const map = encodeURIComponent(displacementMapSvg(height, width, radius, depth));
+        const channel = (r, g, b) => '<feColorMatrix type="matrix" values="' + r + ' 0 0 0 0  0 ' +
+          g + ' 0 0 0  0 0 ' + b + ' 0 0  0 0 0 1 0" result="d' + r + g + b + '"/>';
+        return '<svg height="' + height + '" width="' + width +
+          '" viewBox="0 0 ' + width + ' ' + height + '" xmlns="http://www.w3.org/2000/svg"><defs>' +
+          '<filter id="displace" color-interpolation-filters="sRGB">' +
+          '<feImage x="0" y="0" height="' + height + '" width="' + width +
+          '" href="data:image/svg+xml;utf8,' + map + '" result="displacementMap"/>' +
+          '<feDisplacementMap transform-origin="center" in="SourceGraphic" in2="displacementMap" scale="' +
+          (strength + chromaticAberration * 2) + '" xChannelSelector="R" yChannelSelector="G"/>' +
+          channel(1, 0, 0) +
+          '<feDisplacementMap in="SourceGraphic" in2="displacementMap" scale="' +
+          (strength + chromaticAberration) + '" xChannelSelector="R" yChannelSelector="G"/>' +
+          channel(0, 1, 0) +
+          '<feDisplacementMap in="SourceGraphic" in2="displacementMap" scale="' + strength +
+          '" xChannelSelector="R" yChannelSelector="G"/>' +
+          channel(0, 0, 1) +
+          '<feBlend in="d100" in2="d010" mode="screen"/>' +
+          '<feBlend in2="d001" mode="screen"/>' +
+          '</filter></defs></svg>';
+      }
+
+      const glassFilterCache = new Map();
+
+      function glassFilter(opts) {
+        /* Bucket to 24px. The map is smooth, so a few pixels of drift in the
+         * generated SVG is invisible — and it is the difference between one
+         * filter per grid and one per card. */
+        const bucket = (n) => Math.max(24, Math.round(n / 24) * 24);
+        const key = [bucket(opts.width), bucket(opts.height), opts.radius, opts.depth].join(':');
+        let url = glassFilterCache.get(key);
+        if (url === undefined) {
+          url = 'data:image/svg+xml;utf8,' +
+            encodeURIComponent(displacementFilterSvg({
+              height: bucket(opts.height), width: bucket(opts.width),
+              radius: opts.radius, depth: opts.depth, strength: 100, chromaticAberration: 2
+            })) + '#displace';
+          glassFilterCache.set(key, url);
+        }
+        return url;
+      }
+
+      /* Size one surface and point it at its filter. Everything else about it —
+       * tint, blur, edge — stays in the stylesheet. */
+      function refract(node, depth) {
+        const rect = node.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
+        const radius = parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0;
+        node.style.setProperty('--glass-filter',
+          'url("' + glassFilter({ height: rect.height, width: rect.width, radius, depth }) + '")');
+      }
+
+      function glassTier() {
+        if (state.glass === 'off') return 'off';
+        if (state.glass === 'full') return 'full';
+        return 'lite';
+      }
+
+      function applyGlass(group) {
+        const tier = glassTier();
+        const root = typeof group.root === 'string' ? $(group.root) : group.root;
+        if (!root) return;
+        /* 'lite' only refracts the three surfaces named GLASS_LIT; everything
+         * else keeps the blur-only treatment the stylesheet already gives it. */
+        const wants = tier === 'full' || GLASS_LIT.indexOf(group.nodes) >= 0;
+        const nodes = group.own ? [root] : root.querySelectorAll(group.nodes);
+        nodes.forEach((node) => {
+          if (!wants || tier === 'off') { node.style.removeProperty('--glass-filter'); return; }
+          refract(node, GLASS_DEPTH[tier]);
+        });
+      }
+
+      /* One frame, coalesced: render() rebuilds the board, and a resize can fire
+       * faster than a repaint. */
+      let glassFrame = 0;
+      function requestGlass() {
+        if (glassFrame) return;
+        glassFrame = requestAnimationFrame(() => {
+          glassFrame = 0;
+          GLASS_GROUPS.forEach(applyGlass);
+        });
+      }
+
+      function setGlassTier(tier) {
+        state.glass = tier;
+        try { localStorage.setItem('am.glass', tier); } catch (e) { /* ignore */ }
+        /* 'off' is expressed entirely in CSS, so the toggle never has to undo
+         * inline filters one node at a time — it drops the attribute and the
+         * tokens go back to opaque. */
+        document.documentElement.dataset.glass = tier;
+        requestGlass();
+      }
+
+      function initGlass() {
+        /* Persisted choice wins, except where the OS has already asked for less:
+         * reduced-transparency and forced-colors are handled in CSS by pinning
+         * the tokens, so honouring them here would only add a way to be wrong. */
+        document.documentElement.dataset.glass = state.glass;
+
+        if (state.glass !== 'off' && supportsBackdropUrl) {
+          /* Watch the containers, not the cards. Children are uniform inside
+           * each grid, and 200 individual observers is a real cost on a board
+           * that repaints every 5s. */
+          const ro = new ResizeObserver(requestGlass);
+          GLASS_GROUPS.forEach((g) => {
+            const root = $(g.root);
+            if (root) ro.observe(root);
+          });
+          /* The detail panel is rebuilt in place and changes height as a session
+           * is expanded, and it holds a .log that nothing else sizes. */
+          ro.observe($('#detail'));
+          window.addEventListener('resize', requestGlass, { passive: true });
+        }
+
+        requestGlass();
+      }
 
       const num = (n) => (n || 0).toLocaleString();
       const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0);
@@ -1579,6 +2087,10 @@ th {
       function render() {
         const data = state.data;
         if (!data) return;
+        /* render() replaces the cards and rows wholesale, so any filter minted for
+           the previous nodes is gone with them. One frame is enough — the observer
+           on #board / #tree fires on the height change anyway. */
+        requestGlass();
 
         const details = (data.details || []).slice();
         const byId = new Map(details.map((d) => [d.id, d]));
@@ -1812,6 +2324,26 @@ th {
         try { localStorage.setItem('am.auto', state.auto ? '1' : '0'); } catch (e) { /* ignore */ }
         paintAuto();
         scheduleAuto();
+      });
+
+      /* Cycles full -> lite -> off. The label is the current tier rather than the
+       * action, because 'Glass' on its own would not say which of the three the
+       * board is in. */
+      const glassBtn = $('#glassToggle');
+      const paintGlass = () => {
+        glassBtn.textContent = 'Glass ' + state.glass;
+        glassBtn.classList.toggle('on', state.glass === 'full');
+        glassBtn.title = 'glass refraction — full (every panel), lite (header, KPIs and the' +
+          ' chat dock only), off (opaque panels). Full refracts every card, which is the' +
+          ' reason it is not the default: the board repaints every 5s.';
+        if (!supportsBackdropUrl && state.glass !== 'off') {
+          glassBtn.title += ' This browser has no backdrop-filter: url(), so it is showing' +
+            ' frosted panels with no refraction.';
+        }
+      };
+      glassBtn.addEventListener('click', () => {
+        setGlassTier(GLASS_TIERS[(GLASS_TIERS.indexOf(state.glass) + 1) % GLASS_TIERS.length]);
+        paintGlass();
       });
 
       const search = $('#search');
@@ -2270,6 +2802,10 @@ th {
       function setDock(open) {
         chat.open = open;
         document.body.classList.toggle('dock-open', open);
+        /* The dock measures zero while display:none, so its filter could not be
+           minted until now. Asking again also re-measures the board, which just
+           lost 460px of width and re-flowed its grid. */
+        requestGlass();
         const b = $('#chatToggle');
         b.setAttribute('aria-pressed', String(open));
         b.classList.toggle('on', open);
@@ -2338,6 +2874,8 @@ th {
       });
 
       paintAuto();
+      paintGlass();
+      initGlass();
       scheduleAuto();
       load();
       loadCatalog();

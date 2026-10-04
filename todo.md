@@ -18,6 +18,11 @@ out to the authenticated `kilo` binary and writes `state.json`; the entire UI is
 Design intent: **an ops board, not a chat app.** Dense, dark, keyboard-navigable,
 scannable at a glance. It is not a marketing page and it does not get a hero section.
 
+The surface treatment is one material — frosted glass over an ambient bloom, with
+the edges refracting it (see `README.md` → *The theme*). Dense is the load-bearing
+word: the glass is a finish, not a layout change, and the state colours are the
+fastest read on the board and are not negotiable.
+
 ## 2. Ground rules
 
 These are not style preferences. Breaking one breaks the packaged app or the user's
@@ -29,7 +34,8 @@ setup.
 | Backend uses Node stdlib only (`node:http`, `node:child_process`, `node:fs`). | Same reason. `stage.mjs` bundles no `node_modules`. |
 | Never widen `--host` off `127.0.0.1`. | The chat dock auto-approves tools. `0.0.0.0` hands anyone on the LAN an agent with shell access in these projects (`serve.mjs:64-69`). |
 | **Any new root-level `.mjs` must be added to `RUNTIME_FILES`** in `desktop/stage.mjs:37`. | That allowlist is what gets embedded. A module missing from it works from `node serve.mjs` and 404s inside `AgentManager.exe`. `assets/` is copied wholesale, so files added there need no registration. |
-| Keep the GitHub dark tokens (`index.html:11-35`) as the palette. | Already the house theme. New colour means a new `--var`, not a literal hex. |
+| Keep the state colours (`index.html`, `--blue` / `--green` / `--yellow` / `--red` / `--purple`) exactly as they were. | Running, busy, error and root are read at a glance across the whole board. A glass retheme changed every surface tint and left these alone. New colour means a new `--var`, not a literal hex. |
+| Surface tint and glass depth go through tokens (`--glass-fill*`, `--glass-edge`, `--glass-blur`, `--glass-inner`), never a literal `rgba()` in a rule. | A tint written straight into a rule is a tint the `off` tier cannot reach. That is the bug that made `Glass: off` still look like glass. |
 | Preserve element ids other code queries (`#liveDot`, `#meta`, `#search`, `#sessions`, …). | `render()`, `load()` and the key handler all look them up by id. |
 | No model/tool output through `innerHTML`. | The dock renders output from a tool-enabled agent. Build text nodes. |
 | Do not edit anything under `desktop/src-tauri/payload/`. | Generated. Rewritten by `stage.mjs` on every stage. |
@@ -38,7 +44,7 @@ setup.
 
 | File | Role | Touch it for |
 | --- | --- | --- |
-| `index.html` | Entire UI: CSS `:9-946`, markup `:949-1026`, app `:1027-1963` | anything visual or interactive |
+| `index.html` | Entire UI: CSS `:9-1357`, markup `:1360-1442`, app `:1444-2883` | anything visual or interactive |
 | `serve.mjs` | Static server + all `/api/*` routes | new endpoints |
 | `chat.mjs` | Private `kilo serve` on :9789, streaming client | chat transport |
 | `workspace.mjs` | Resolves the folder VSCodium has open | directory picking |

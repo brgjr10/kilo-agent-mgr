@@ -1,23 +1,91 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-glass="lite">
 
 <head>
   <meta charset="utf-8">
   <title>Agent Manager</title>
   <style>
+    /* The splash uses the same tokens as the dashboard, at the same values, so
+       the window does not change colour when the app arrives. Kept inline and
+       dependency-free like the rest of the shell: this page is shown while the
+       backend is still starting, so it cannot wait on anything. */
+    :root {
+      --bg-deep: #05070b;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --blue: #58a6ff;
+      --border: rgba(255, 255, 255, 0.11);
+      --glass-fill: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.035));
+      --glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.13),
+        inset 0 0 1px 0 rgba(255, 255, 255, 0.09),
+        inset 0 -1px 0 rgba(0, 0, 0, 0.28),
+        0 1px 2px rgba(0, 0, 0, 0.34),
+        0 10px 26px -14px rgba(0, 0, 0, 0.62);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
       margin: 0;
-      height: 100vh;
+      min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 14px;
-      background: #0d1117;
-      color: #e6edf3;
+      background: var(--bg-deep);
+      color: var(--text);
       font: 13px/1.5 ui-sans-serif, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       text-align: center;
       padding: 24px;
+    }
+
+    /* the liquid — the same ambient bloom the dashboard refracts */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -2;
+      pointer-events: none;
+      background:
+        radial-gradient(1100px 780px at 10% -12%, rgba(56, 139, 253, 0.26), transparent 62%),
+        radial-gradient(940px 700px at 92% -4%, rgba(168, 85, 247, 0.20), transparent 64%),
+        radial-gradient(880px 880px at 74% 104%, rgba(45, 212, 191, 0.15), transparent 62%),
+        var(--bg-deep);
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      pointer-events: none;
+      opacity: 0.035;
+      background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    }
+
+    .panel {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      max-width: 34em;
+      padding: 26px 30px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--glass-fill);
+      box-shadow: var(--glass-edge);
+      -webkit-backdrop-filter: blur(16px) saturate(180%) brightness(1.06);
+      backdrop-filter: blur(16px) saturate(180%) brightness(1.06);
+    }
+
+    @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+      .panel {
+        background: #161b22;
+      }
     }
 
     h1 {
@@ -28,15 +96,15 @@
 
     p {
       margin: 0;
-      color: #8b949e;
-      max-width: 34em;
+      color: var(--muted);
     }
 
     .dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
-      background: #58a6ff;
+      background: var(--blue);
+      box-shadow: 0 0 12px rgba(88, 166, 255, 0.7);
       animation: pulse 1.4s ease-in-out infinite;
     }
 
@@ -57,13 +125,31 @@
         animation: none;
       }
     }
+
+    /* Reduced transparency is a request for less glass, not for no information:
+       the panel goes opaque and everything still reads. */
+    @media (prefers-reduced-transparency: reduce) {
+      body::before,
+      body::after {
+        display: none;
+      }
+
+      .panel {
+        background: #161b22;
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+      }
+    }
   </style>
 </head>
 
 <body>
-  <div class="dot"></div>
-  <h1>Starting the Agent Manager backend…</h1>
-  <p>Waiting for the local server to report the port it bound.</p>
+  <div class="panel">
+    <div class="dot"></div>
+    <h1>Starting the Agent Manager backend…</h1>
+    <p>Waiting for the local server to report the port it bound.</p>
+  </div>
+
 </body>
 
 </html>

@@ -1,10 +1,39 @@
 # Agent Manager
 
-A reskinned dashboard for Kilo Code that shows **every agent working right now**
+A liquid-glass dashboard for Kilo Code that shows **every agent working right now**
 side by side, plus the subagent task tree and overall task completion.
 
 Data comes from the authenticated local Kilo CLI — no server auth, no tokens in
 the browser.
+
+## The theme
+
+The UI is one material: frosted glass panels floating over a dark ambient bloom.
+Panels are translucent, the bloom shows through them, and their edges refract it —
+[Apple's iOS 26 Liquid Glass](https://github.com/nikdelvin/liquid-glass) effect,
+recreated in plain CSS and generated SVG filters with no build step and no
+dependencies. That upstream project is the source of the technique; the MIT notice
+travels with it.
+
+| Tier | What refracts | Why |
+| --- | --- | --- |
+| `full` | every panel — cards, rows, tables, dock | the full effect, for GPUs with the headroom |
+| `lite` | header, KPI tiles, chat dock | **default.** The board can hold 200 cards and repaints every 5s |
+| `off` | nothing; opaque panels | for machines where a filtered backdrop costs more than it is worth |
+
+`Glass` in the header cycles the tiers and remembers the choice in `localStorage`.
+It also degrades on its own:
+
+- **No `backdrop-filter: url()`** (WebKit) — no filter is generated at all and the
+  page falls back to frosted panels. Nothing throws.
+- **`prefers-reduced-transparency: reduce`** — the glass tokens are pinned back to
+  opaque hexes, so the effect is dropped without the layout changing.
+- **`forced-colors: active`** — the OS is painting surfaces itself; the decorative
+  layers step aside.
+
+The accent palette is unchanged from the previous dark theme, because the state
+colours (green running, yellow busy, red error, blue root) are load-bearing and
+have to stay distinguishable at a glance.
 
 ## Run it
 
@@ -179,6 +208,29 @@ behind basic auth and is shared with the editor.
 | `state.json` | Generated snapshot — safe to delete |
 | `.cache/` | Derived per-session detail cache, keyed on session `updated` |
 | `sync.ps1` | Copies the editable mirror to the share this project runs from |
+
+### How the glass is made
+
+`index.html` holds the whole UI, so the effect is inline too — no bundler, no
+package.json. Three pieces:
+
+| Piece | Where |
+| --- | --- |
+| Ambient bloom | `body::before` (gradients) + `body::after` (SVG grain). Fixed, and behind everything, so scrolling does not drag it |
+| Glass recipe | `--glass-blur` / `--glass-fill` / `--glass-edge` tokens, plus one grouped selector that applies the backdrop to every surface |
+| Refraction | `displacementMapSvg` / `displacementFilterSvg` build an SVG displacement map and an `feDisplacementMap` filter as a data URI, pointed at by `--glass-filter` |
+
+The CSS alone gives a frosted panel with no JavaScript at all. The script only
+adds the refraction, and only on the tier's surfaces. Two adaptations to the
+upstream implementation, both because this board repaints every few seconds and
+holds far more surfaces than a four-panel demo:
+
+- **One filter per 24px size bucket, not one per element.** Upstream regenerates
+  the filter data-URI for every glass element it measures. Cards in a CSS grid are
+  all the same size, so 200 cards share one filter string.
+- **The containers are observed, not the cards.** `ResizeObserver` watches the
+  board, the KPI strip, the tree, the dock and the detail panel; their children
+  are uniform, so one measurement sizes the lot.
 
 ## How it works
 
