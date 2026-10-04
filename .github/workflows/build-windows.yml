@@ -66,8 +66,8 @@ jobs:
         working-directory: desktop
         run: node stage.mjs
 
-      # --no-bundle is the whole point: it emits the raw executable instead of an
-      # MSI/NSIS installer, which is what makes the result portable.
+      # --no-bundle is what makes the result portable: it emits the raw
+      # executable instead of an MSI/NSIS installer.
       #
       # The npm CLI rather than `cargo install tauri-cli`: same tool, pinned to a
       # major, and it skips a long compile of the CLI itself.
@@ -75,13 +75,19 @@ jobs:
         working-directory: desktop
         run: npx --yes @tauri-apps/cli@2 build --no-bundle
 
+      # --no-bundle does NOT embed `bundle.resources`: the bundler copies them
+      # next to the exe, so the raw binary on its own starts, finds nothing, and
+      # shows the failure page. The next step appends the payload to the exe
+      # instead, which is what actually makes it a single portable file.
+      - name: Append payload
+        working-directory: desktop
+        run: node package-exe.mjs
+
       - name: Collect artifact
         run: |
-          $exe = "desktop\src-tauri\target\release\agent-manager.exe"
+          $exe = "dist\AgentManager.exe"
           if (-not (Test-Path $exe)) { throw "expected $exe to exist" }
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item $exe "dist\AgentManager.exe"
-          Get-Item "dist\AgentManager.exe" | Select-Object Name, Length
+          Get-Item $exe | Select-Object Name, Length
 
       - name: Upload
         uses: actions/upload-artifact@v4

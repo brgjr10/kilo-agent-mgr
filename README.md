@@ -60,10 +60,35 @@ To build locally instead:
 cd desktop
 node stage.mjs                                   # payload + icons
 npx @tauri-apps/cli@2 build --no-bundle          # needs Rust 1.85+ and VS Build Tools
+node package-exe.mjs                             # append the payload -> ../dist/AgentManager.exe
 ```
 
 `--no-bundle` is what makes it portable — it emits the raw executable rather than
-an MSI or NSIS installer.
+an MSI or NSIS installer. But it does **not** embed `bundle.resources`: the
+bundler copies those next to the exe, so on its own `--no-bundle` produces a ~3 MB
+shell that starts, finds no payload, and shows the failure page.
+
+`package-exe.mjs` is what closes that gap. It appends the payload to the finished
+exe behind a 16-byte trailer, and the shell reads itself back on launch:
+
+```text
+[ tauri shell ][ payload pack ][ magic "AGMPEND\0" ][ pack length u64 ]
+                                                          ^-- last 16 bytes
+```
+
+A PE loader ignores everything after the image, so the result is still a single
+file you can put anywhere. The pack is a flat run of little-endian headers rather
+than a zip, so the one code path that has to work before the app can start needs
+no archive dependency.
+
+**Where does the exe go?** Anywhere writable — there is nothing to install beside
+it. `node.exe` is inside the payload, not looked up on `PATH`. The one requirement
+is that the folder you drop it in is writable, because first launch expands the
+payload into `%LOCALAPPDATA%\com.brodie.agentmanager\app\`.
+
+> A bare ~3 MB `AgentManager.exe` is the unappended shell, not the real app. The
+> shipped one is ~100 MB, dominated by `node.exe`. If it is small, you have the
+> wrong build.
 
 | Piece | Where it comes from |
 | --- | --- |
@@ -71,12 +96,13 @@ an MSI or NSIS installer.
 | dashboard, chat, collector | bundled from this repo by `desktop/stage.mjs` |
 | `node.exe` | copied from `$AGENT_MANAGER_NODE`, else PATH, else downloaded (Node LTS) |
 | `kilo.exe` | **not bundled** — discovered at runtime by `kilo-bin.mjs` |
+| `state.json` | **not bundled** — machine-specific and gitignored; the first collect creates it |
 
-At first launch the payload is extracted from the exe into
-`%LOCALAPPDATA%\AgentManager\app\`, which is also where `serve.mjs` writes
-`state.json`, `backend.log` and `port-<pid>.txt`. That is also the first place to
-look when the app starts but shows the failure page — `backend.log` has the URL
-it bound and anything that went wrong.
+At first launch the payload is expanded from the exe into
+`%LOCALAPPDATA%\com.brodie.agentmanager\app\`, which is also where `serve.mjs`
+writes `state.json`, `backend.log` and `port-<pid>.txt`. That is also the first
+place to look when the app starts but shows the failure page — `backend.log` has
+the URL it bound and anything that went wrong.
 
 Two consequences worth knowing:
 

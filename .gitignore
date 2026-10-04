@@ -10,5 +10,10 @@ desktop/src-tauri/target/
 desktop/src-tauri/gen/
 desktop/node_modules/
 
+# built app — carries node.exe inside it, so it is ~100 MB. Produced by CI, or
+# by `node desktop/package-exe.mjs`; never committed.
+AgentManager.exe
+dist/
+
 # Windows noise
 Thumbs.db
