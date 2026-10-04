@@ -1,0 +1,3 @@
+# runtime artifacts — safe to delete / regenerated on every collect
+.cache/
+state.json
