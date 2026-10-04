@@ -24,6 +24,11 @@ use url::Url;
 
 /// Bumped whenever the payload must be re-staged. Compared against a stamp file
 /// so an app update replaces the scripts without re-copying them every launch.
+///
+/// This tracks the *package* version, so any change to the staged files —
+/// index.html, serve.mjs, the .mjs modules — must ship alongside a version bump
+/// or it will not reach anyone who already ran the previous build: their stamp
+/// still matches and the stale payload is kept.
 const PAYLOAD_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const BOOT_TIMEOUT: Duration = Duration::from_secs(45);
