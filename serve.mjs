@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 import * as chat from "./chat.mjs";
 import { resolveWorkspace } from "./workspace.mjs";
 import { kiloBinOrFallback } from "./kilo-bin.mjs";
+import { catalog } from "./catalog.mjs";
 
 const __dir = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -98,6 +99,8 @@ let collecting = false;
 // working: state.json simply never appears, and the dashboard can only say
 // "not there yet" however many minutes that goes on for.
 let lastCollectError = null;
+let _catalog = null;
+let _catalogMtime = 0;
 
 // Runs the collector as a child process. Must stay async: spawnSync would block
 // the event loop for the whole export pass and freeze every dashboard request.
@@ -380,6 +383,20 @@ const server = http.createServer((req, res) => {
       collecting,
       lastCollectError,
     });
+    return;
+  }
+
+  if (url === "/api/catalog" && req.method === "GET") {
+    try {
+      const mt = fs.statSync(STATE).mtimeMs;
+      if (!_catalog || _catalogMtime !== mt) {
+        _catalog = catalog(STATE);
+        _catalogMtime = mt;
+      }
+    } catch {
+      _catalog = { agents: [], commands: [], skills: [], tools: {} };
+    }
+    json(res, 200, { ok: true, ..._catalog });
     return;
   }
 

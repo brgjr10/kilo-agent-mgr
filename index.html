@@ -699,6 +699,18 @@ th {
       font-style: italic;
     }
 
+    .thinking-row {
+      color: var(--muted);
+      font-size: 11px;
+      font-style: italic;
+      padding: 3px 7px;
+    }
+    .thinking-row .thinking-secs {
+      font-family: var(--mono);
+      font-style: normal;
+      color: var(--text);
+    }
+
     .log-row .body {
       flex: 1;
       min-width: 0;
@@ -949,6 +961,7 @@ th {
     <span class="meta" id="tokenTotal" title="total tokens across tracked sessions"></span>
     <select id="headerDir" title="chat workspace directory" style="max-width:220px"></select>
     <span class="badge" id="headerDirSource" style="margin-right:8px">—</span>
+    <select id="catalogTools" title="installed agents, commands, skills and tools" style="max-width:200px"></select>
     <div class="spacer"></div>
     <input type="search" id="search" placeholder="filter sessions, agents, activity…  ( / )" autocomplete="off">
     <button id="autoBtn" aria-pressed="true" title="poll state.json every 5s">Auto 5s</button>
@@ -1679,6 +1692,61 @@ th {
         }
       }
 
+      async function loadCatalog() {
+        const sel = $('#catalogTools');
+        try {
+          const j = await api('/api/catalog');
+          const descMap = {};
+          const groups = [];
+          const agents = j.agents || [];
+          if (agents.length) {
+            agents.forEach((a) => { descMap[a.name] = a.description; });
+            groups.push({ label: 'Agents (' + agents.length + ')', items: agents.map((a) => a.name) });
+          }
+          const commands = j.commands || [];
+          if (commands.length) {
+            commands.forEach((c) => { descMap[c.name] = c.description; });
+            groups.push({ label: 'Commands (' + commands.length + ')', items: commands.map((c) => c.name) });
+          }
+          const skills = j.skills || [];
+          if (skills.length) {
+            skills.forEach((s) => { descMap[s.name] = s.description; });
+            groups.push({ label: 'Skills (' + skills.length + ')', items: skills.map((s) => s.name) });
+          }
+          const tools = j.tools || {};
+          const toolNames = Object.keys(tools);
+          if (toolNames.length) {
+            groups.push({ label: 'Tools (' + toolNames.length + ')', items: toolNames });
+            toolNames.forEach((n) => { descMap[n] = tools[n] + ' calls'; });
+          }
+          sel.replaceChildren(
+            ...groups.map((g) => {
+              const og = document.createElement('optgroup');
+              og.label = g.label;
+              g.items.forEach((name) => {
+                const o = document.createElement('option');
+                o.value = name;
+                const d = descMap[name] || '';
+                o.textContent = d ? name + ' — ' + d : name;
+                og.appendChild(o);
+              });
+              return og;
+            })
+          );
+          if (!sel.options.length) {
+            const o = document.createElement('option');
+            o.value = '';
+            o.textContent = 'no catalog yet';
+            sel.appendChild(o);
+          }
+        } catch (e) {
+          const o = document.createElement('option');
+          o.value = '';
+          o.textContent = 'catalog unavailable';
+          sel.appendChild(o);
+        }
+      }
+
       function paintWorkspace() {
         $('#chatWsPath').textContent = chat.directory || 'no workspace detected';
         $('#chatWsPath').title = chat.directory || '';
@@ -1984,6 +2052,7 @@ th {
       paintAuto();
       scheduleAuto();
       load();
+      loadCatalog();
     })();
   </script>
 </body>

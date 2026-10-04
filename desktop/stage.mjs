@@ -41,6 +41,7 @@ const RUNTIME_FILES = [
   "chat.mjs",
   "workspace.mjs",
   "kilo-bin.mjs",
+  "catalog.mjs",
 ];
 
 const OPTIONAL_RUNTIME_FILES = ["state.json"];
