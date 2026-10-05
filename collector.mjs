@@ -16,7 +16,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, renameSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { kiloBin } from "./kilo-bin.mjs";
@@ -38,6 +38,12 @@ const TRANSCRIPT = parseInt(arg("--transcript", "40"), 10);
 const LOG_CHARS = parseInt(arg("--log-chars", "1200"), 10);
 const OUT_PATH = resolve(arg("--out", resolve(__dir, "state.json")));
 const CACHE_DIR = resolve(arg("--cache", resolve(__dir, ".cache")));
+
+// Clean up any stale tmp file from an interrupted previous run.
+try {
+  const tmp = OUT_PATH + ".tmp";
+  if (existsSync(tmp)) unlinkSync(tmp);
+} catch { /* ignore */ }
 
 // bump when the derived shape changes so stale cache entries are not reused
 const CACHE_VERSION = 2;
@@ -80,6 +86,12 @@ function cachePrune(liveIds) {
   } catch {
     /* best-effort */
   }
+}
+
+function atomicWriteJson(filePath, data) {
+  const tmp = filePath + ".tmp";
+  writeFileSync(tmp, JSON.stringify(data, null, 2), "utf8");
+  renameSync(tmp, filePath);
 }
 
 // run a kilo subcommand and return trimmed stdout; throws with stderr on failure
@@ -325,9 +337,9 @@ for (const d of details) {
 data.details = details;
 data.trackedSessionCount = detailIds.size;
 
-if (process.argv.includes("--prune-cache")) cachePrune(new Set(data.sessions.map((s) => s.id)));
+cachePrune(new Set(data.sessions.map((s) => s.id)));
 
-writeFileSync(OUT_PATH, JSON.stringify(data, null, 2), "utf8");
+atomicWriteJson(OUT_PATH, data);
 
 const tasks = details.reduce((n, d) => n + (d.tasks ? d.tasks.length : 0), 0);
 const done = details.reduce(

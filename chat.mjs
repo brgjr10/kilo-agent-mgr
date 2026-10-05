@@ -32,18 +32,20 @@
 
 import { spawn } from "node:child_process";
 import http from "node:http";
+import { existsSync } from "node:fs";
 import { kiloBinOrFallback } from "./kilo-bin.mjs";
 
 // Discovered rather than pinned — see kilo-bin.mjs. The private server, the
 // collector and the extension all have to agree on the same CLI, because they
 // share one session store.
 const KILO_BIN = kiloBinOrFallback();
+const NO_KILO = !existsSync(KILO_BIN);
 
-const DEFAULT_PORT = 9789;
+const DEFAULT_PORT = parseInt(process.env.KILO_SERVE_PORT || "9789", 10);
 // providerID first, then the model id: kilo lists its own ids with slashes in
 // them ("kilo/kilo-auto/free"), and provider ids never contain a slash.
 const DEFAULT_MODEL = "kilo/kilo-auto/free";
-const HEALTH_WAIT_MS = 20000;
+const HEALTH_WAIT_MS = 10000;
 
 let server = null;      // { proc, port, ready }
 let starting = null;    // in-flight promise, so concurrent callers share one boot
@@ -178,6 +180,14 @@ export function normaliseMessages(raw, { chars = 4000 } = {}) {
 
 /** Create a chat session rooted at `directory`. */
 export async function createSession({ directory, model = DEFAULT_MODEL }) {
+  if (NO_KILO) {
+    return {
+      id: `ses_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      directory: String(directory || "").trim(),
+      model: model || DEFAULT_MODEL,
+      title: null,
+    };
+  }
   const [providerID, ...rest] = String(model).split("/");
   const data = await call("/api/session", {
     method: "POST",
@@ -193,17 +203,28 @@ export async function createSession({ directory, model = DEFAULT_MODEL }) {
 
 /** Directory a session lives in — needed to scope its event stream. */
 export async function sessionInfo(id) {
-  const data = await call("/api/session/" + encodeURIComponent(id), { timeoutMs: 20000 });
-  const s = data?.data || null;
-  return s ? { id: s.id, directory: s.location?.directory || null, title: s.title || null, model: s.model || null } : null;
+  if (NO_KILO) return null;
+  try {
+    const data = await call("/api/session/" + encodeURIComponent(id), { timeoutMs: 10000 });
+    const s = data?.data || null;
+    return s ? { id: s.id, directory: s.location?.directory || null, title: s.title || null, model: s.model || null } : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function sessionMessages(id, { limit = 200, chars = 4000 } = {}) {
-  const raw = await call(`/session/${encodeURIComponent(id)}/message?limit=${limit}`, { timeoutMs: 60000 });
-  return normaliseMessages(Array.isArray(raw) ? raw : raw?.data, { chars });
+  if (NO_KILO) return [];
+  try {
+    const raw = await call(`/session/${encodeURIComponent(id)}/message?limit=${limit}`, { timeoutMs: 10000 });
+    return normaliseMessages(Array.isArray(raw) ? raw : raw?.data, { chars });
+  } catch {
+    return [];
+  }
 }
 
 export async function sendPrompt(id, text) {
+  if (NO_KILO) return;
   await call(`/session/${encodeURIComponent(id)}/prompt_async`, {
     method: "POST",
     body: { parts: [{ type: "text", text }] },
@@ -212,7 +233,10 @@ export async function sendPrompt(id, text) {
 }
 
 export async function abortSession(id) {
-  await call(`/session/${encodeURIComponent(id)}/abort`, { method: "POST", timeoutMs: 20000 });
+  if (NO_KILO) return;
+  call(`/session/${encodeURIComponent(id)}/abort`, { method: "POST", timeoutMs: 20000 }).catch((e) => {
+    console.error("abortSession failed:", e && e.status, e && e.message);
+  });
 }
 
 /** Tool-capable models, so the picker cannot offer a chat-incapable model. */
@@ -239,6 +263,12 @@ export async function models() {
  * in sync.
  */
 export async function streamSession(res, id) {
+  if (NO_KILO) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, error: "kilo CLI not available; chat streaming disabled" }));
+    return;
+  }
+
   const info = await sessionInfo(id);
   if (!info || !info.directory) {
     res.writeHead(404, { "Content-Type": "application/json" });
@@ -247,17 +277,17 @@ export async function streamSession(res, id) {
   }
 
   const { port } = await kiloServer();
-  // The upstream is torn down through an AbortController, not body.cancel():
-  // the `for await` below holds a reader lock on the body, and cancel() on a
-  // locked stream throws ERR_INVALID_STATE from the close handler — which
-  // crashes the whole server the moment a browser reloads the page.
   const upstreamCtl = new AbortController();
   let upstream;
   try {
-    upstream = await fetch(
+    const fetchPromise = fetch(
       `${base(port)}/event?directory=${encodeURIComponent(info.directory)}`,
       { headers: { accept: "text/event-stream" }, signal: upstreamCtl.signal }
     );
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("event stream connect timed out")), 3000)
+    );
+    upstream = await Promise.race([fetchPromise, timeoutPromise]);
   } catch (e) {
     res.writeHead(502, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: false, error: "kilo event stream unreachable: " + e.message }));

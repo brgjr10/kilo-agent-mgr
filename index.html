@@ -2004,10 +2004,24 @@ th {
             const m = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
             if (m) {
               const a = el('a', null, m[1]);
-              a.href = m[2];
-              a.rel = 'noopener noreferrer';
-              a.target = '_blank';
-              frag.appendChild(a);
+              let href = m[2];
+              const protoMatch = href.match(/^([a-z][a-z0-9+.-]*):/i);
+              if (protoMatch) {
+                const allowed = ['http', 'https', 'mailto', 'tel'].includes(protoMatch[1].toLowerCase());
+                if (!allowed) {
+                  frag.appendChild(document.createTextNode(part));
+                } else {
+                  a.href = href;
+                  a.rel = 'noopener noreferrer';
+                  a.target = '_blank';
+                  frag.appendChild(a);
+                }
+              } else {
+                a.href = href;
+                a.rel = 'noopener noreferrer';
+                a.target = '_blank';
+                frag.appendChild(a);
+              }
             } else {
               frag.appendChild(document.createTextNode(part));
             }

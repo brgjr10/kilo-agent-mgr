@@ -1,0 +1,11 @@
+{
+  "name": "kilo-agent-mgr",
+  "version": "1.0.5",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

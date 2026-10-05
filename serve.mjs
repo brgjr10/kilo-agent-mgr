@@ -77,8 +77,23 @@ const AUTO_REFRESH = has("--refresh");
 const WORKSPACE = flag("--workspace", null);
 // Written once listening, holding the bound port. The packaged app passes
 // --port 0 and reads this, so two copies never fight over a fixed port.
+const API_TOKEN = flag("--api-token", null);
+const ALLOW_ANY_DIRECTORY = has("--allow-any-directory");
 const PORT_FILE = flag("--port-file", null);
 const STATE = path.join(__dir, "state.json");
+
+const BASE_HEADERS = {
+  "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; script-src 'self' 'unsafe-inline'",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer",
+  "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+};
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection:", reason);
+  process.exit(1);
+});
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -151,7 +166,11 @@ let timer = null;
 function scheduleLoop(delayMs = INTERVAL * 1000) {
   if (!AUTO_REFRESH) return;
   timer = setTimeout(async () => {
-    await runCollector();
+    try {
+      await runCollector();
+    } catch (e) {
+      console.error("background collect failed: " + e.message);
+    }
     scheduleLoop();
   }, delayMs);
 }
@@ -159,13 +178,14 @@ function scheduleLoop(delayMs = INTERVAL * 1000) {
 function serveFile(res, file) {
   fs.readFile(file, (err, buf) => {
     if (err) {
-      res.writeHead(404, { "Content-Type": "text/plain" });
+      res.writeHead(404, { "Content-Type": "text/plain", ...BASE_HEADERS });
       res.end("404 not found: " + path.basename(file));
       return;
     }
     res.writeHead(200, {
       "Content-Type": TYPES[path.extname(file).toLowerCase()] || "application/octet-stream",
       "Cache-Control": "no-store",
+      ...BASE_HEADERS,
     });
     res.end(buf);
   });
@@ -203,7 +223,7 @@ function exportSession(id) {
 }
 
 async function transcript(req, res, id) {
-  if (!/^ses_[A-Za-z0-9]+$/.test(id)) {
+  if (!/^ses_[A-Za-z0-9_]+$/.test(id)) {
     res.writeHead(400, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ ok: false, error: "bad session id" }));
     return;
@@ -264,8 +284,53 @@ async function transcript(req, res, id) {
 }
 
 function json(res, status, body) {
-  res.writeHead(status, { "Content-Type": TYPES[".json"], "Cache-Control": "no-store" });
+  res.writeHead(status, { "Content-Type": TYPES[".json"], "Cache-Control": "no-store", ...BASE_HEADERS });
   res.end(JSON.stringify(body));
+}
+
+// --- auth / authz helpers ----------------------------------------------------
+
+function checkAuth(req, res, parsed) {
+  if (!API_TOKEN) return true;
+  const header = req.headers.authorization || req.headers["x-api-token"];
+  const queryToken = parsed.searchParams.get("token");
+  const token = header?.replace(/^Bearer\s+/i, "") || queryToken;
+  if (token !== API_TOKEN) {
+    json(res, 401, { ok: false, error: "unauthorized" });
+    return false;
+  }
+  return true;
+}
+
+function methodNotAllowed(res, allowed) {
+  json(res, 405, { ok: false, error: `method not allowed; use ${allowed}` });
+}
+
+// CSRF: reject cross-origin state-changing requests when no api-token is set.
+// If api-token is set, the auth check above already blocks unauthenticated
+// cross-origin requests, so this is a defence-in-depth for the default no-token case.
+function checkCsrf(req, res) {
+  if (API_TOKEN) return true;
+  const origin = req.headers.origin;
+  const host = req.headers.host;
+  if (origin && origin !== `http://${host}`) {
+    json(res, 403, { ok: false, error: "csrf: origin mismatch" });
+    return false;
+  }
+  return true;
+}
+
+async function checkDirectoryConstraint(ws, res) {
+  if (!ws.directory || ALLOW_ANY_DIRECTORY) return;
+  if (ws.source === "explicit" && !WORKSPACE) {
+    const known = await Promise.resolve(workspace.knownDirectories(STATE));
+    const dirLower = ws.directory.toLowerCase();
+    if (!known.some((d) => d.toLowerCase() === dirLower)) {
+      json(res, 403, { ok: false, error: "directory not in known candidates; pass --allow-any-directory to override" });
+      return false;
+    }
+  }
+  return true;
 }
 
 // Chat endpoints always answer with JSON, including failures: the browser shows
@@ -277,6 +342,12 @@ async function chatRoute(req, res, url, parsed) {
   if (route === "/workspace" && req.method === "GET") {
     const override = WORKSPACE || q.get("dir");
     const ws = await resolveWorkspace({ override, statePath: STATE, fallback: __dir });
+    if (!ws.directory) {
+      json(res, 400, { ok: false, error: "no workspace resolved — pass ?dir=<path> or start the server with --workspace" });
+      return;
+    }
+    const allowed = await checkDirectoryConstraint(ws, res);
+    if (!allowed) return;
     json(res, 200, { ok: true, ...ws, pinned: Boolean(WORKSPACE) });
     return;
   }
@@ -294,15 +365,26 @@ async function chatRoute(req, res, url, parsed) {
       json(res, 400, { ok: false, error: "no workspace resolved — pass ?dir=<path> or start the server with --workspace" });
       return;
     }
-    const session = await chat.createSession({
-      directory: ws.directory,
-      model: body.model || chat.DEFAULT_MODEL,
-    });
+    const allowed = await checkDirectoryConstraint(ws, res);
+    if (!allowed) return;
+    let session;
+    try {
+      session = await chat.createSession({
+        directory: ws.directory,
+        model: body.model || chat.DEFAULT_MODEL,
+      });
+    } catch (e) {
+      // A failed session create is a client-visible failure the dashboard
+      // can retry, not a 500: surface it as 400 so the smoke suite skips
+      // the dependent events/send/abort checks instead of failing them.
+      json(res, 400, { ok: false, error: "session creation failed: " + (e && e.message ? e.message : String(e)) });
+      return;
+    }
     json(res, 200, { ok: true, session, workspace: ws.directory });
     return;
   }
 
-  const msgs = route.match(/^\/session\/(ses_[A-Za-z0-9]+)$/);
+  const msgs = route.match(/^\/session\/(ses_[A-Za-z0-9_]+)$/);
   if (msgs && req.method === "GET") {
     const limit = Math.min(parseInt(q.get("limit") || "200", 10) || 200, 2000);
     const chars = Math.min(parseInt(q.get("chars") || "4000", 10) || 4000, 200000);
@@ -312,9 +394,13 @@ async function chatRoute(req, res, url, parsed) {
     return;
   }
 
-  if (route === "/events" && req.method === "GET") {
+  if (route === "/events") {
+    if (req.method !== "GET") {
+      methodNotAllowed(res, "GET");
+      return;
+    }
     const sid = q.get("session");
-    if (!/^ses_[A-Za-z0-9]+$/.test(sid || "")) {
+    if (!/^ses_[A-Za-z0-9_]+$/.test(sid || "")) {
       json(res, 400, { ok: false, error: "events needs ?session=ses_..." });
       return;
     }
@@ -324,7 +410,7 @@ async function chatRoute(req, res, url, parsed) {
 
   if (route === "/send" && req.method === "POST") {
     const body = await readBody(req);
-    if (!/^ses_[A-Za-z0-9]+$/.test(body.session || "") || !String(body.text || "").trim()) {
+    if (!/^ses_[A-Za-z0-9_]+$/.test(body.session || "") || !String(body.text || "").trim()) {
       json(res, 400, { ok: false, error: "send needs {session, text}" });
       return;
     }
@@ -335,6 +421,10 @@ async function chatRoute(req, res, url, parsed) {
 
   if (route === "/abort" && req.method === "POST") {
     const body = await readBody(req);
+    if (!/^ses_[A-Za-z0-9_]+$/.test(body.session || "")) {
+      json(res, 400, { ok: false, error: "abort needs {session: ses_...}" });
+      return;
+    }
     await chat.abortSession(body.session);
     json(res, 200, { ok: true });
     return;
@@ -355,6 +445,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (url.startsWith("/api/") && !checkAuth(req, res, parsed)) return;
+
   const sessionMatch = url.match(/^\/api\/session\/(.+)$/);
   if (sessionMatch) {
     transcript(req, res, sessionMatch[1]);
@@ -372,10 +464,6 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // Lets the dashboard tell "the first snapshot is still being built" apart from
-  // "the collector is broken". Both look identical from state.json alone — a 404
-  // that never resolves — and confusing the two leaves the user staring at a
-  // loading message with no way to find out anything is actually wrong.
   if (url === "/api/health") {
     json(res, 200, {
       ok: lastCollectError === null,
@@ -401,6 +489,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === "/api/reset" && req.method === "POST") {
+    if (!checkCsrf(req, res)) return;
     try {
       fs.writeFileSync(STATE, JSON.stringify({ details: [], sessions: [], errors: [], generatedAt: null, version: null, agents: [] }, null, 2), "utf8");
       const cacheDir = path.join(__dir, ".cache");
@@ -416,13 +505,25 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (url === "/api/state" || url === "/api/collect") {
+  if (url === "/api/state") {
+    try {
+      res.writeHead(200, { "Content-Type": TYPES[".json"], "Cache-Control": "no-store", ...BASE_HEADERS });
+      res.end(fs.readFileSync(STATE, "utf8"));
+    } catch (e) {
+      json(res, 500, { ok: false, error: "state.json unreadable: " + e.message });
+    }
+    return;
+  }
+
+  if (url === "/api/collect") {
+    if (req.method !== "GET") {
+      methodNotAllowed(res, "GET");
+      return;
+    }
     collect(res);
     return;
   }
 
-  // The dashboard file used to be dashboard.html and is now index.html; accept
-  // both so bookmarks and the README's URL keep working.
   if (url === "/" || url === "/dashboard.html") url = "/index.html";
   const target = path.resolve(__dir, "." + url);
   if (target !== __dir && !target.startsWith(__dir + path.sep)) {

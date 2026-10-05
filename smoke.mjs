@@ -12,7 +12,7 @@
 
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { writeFileSync, unlinkSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, unlinkSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -44,6 +44,16 @@ function request({ host, port, path, method, body, timeoutMs = 30000 }) {
 function assert(condition, message) {
   if (!condition) throw new Error(message);
   return true;
+}
+
+// Bounds a single check and names it on abort, so one hung endpoint surfaces as a
+// named failure instead of consuming the whole-run guard and reporting nothing.
+function withTimeout(label, promise, ms = 20000) {
+  let timer;
+  const expiry = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, expiry]).finally(() => clearTimeout(timer));
 }
 
 // ── Endpoint checks ───────────────────────────────────────────────────────────
@@ -82,7 +92,7 @@ async function checkState({ host, port }) {
 }
 
 async function checkCollect({ host, port }) {
-  const { status, data } = await request({ host, port, path: "/api/collect?detail=2" });
+  const { status, data } = await request({ host, port, path: "/api/collect?detail=2", timeoutMs: 120000 });
   assert(status === 200, `status ${status} (expected 200)`);
   assert(data !== null, "response is not JSON");
   assert(typeof data === "object", `expected object, got ${typeof data}`);
@@ -161,7 +171,7 @@ async function checkChatEvents({ host, port, sessionId }) {
     host,
     port,
     path: `/api/chat/events?session=${encodeURIComponent(sessionId)}`,
-    timeoutMs: 5000,
+    timeoutMs: 30000,
   });
   // 200 with text/event-stream, or 4xx if session has no directory
   assert(status === 200 || status === 400 || status === 502,
@@ -227,14 +237,19 @@ async function runSmoke() {
   const statePath = join(__dir, "state.json");
   let hadState = existsSync(statePath);
   let originalState = null;
+  let restoreFailed = false;
   if (hadState) {
-    try { originalState = await new Promise((done) => {
-      const rs = require("node:fs").createReadStream(statePath);
-      const chunks = [];
-      rs.on("data", (b) => chunks.push(b));
-      rs.on("end", () => done(Buffer.concat(chunks).toString("utf8")));
-      rs.on("error", () => done(null));
-    }); } catch { originalState = null; }
+    // Read the backup with the already-imported fs functions. This used to call
+    // require("node:fs"), which does not exist in ESM scope: the ReferenceError was
+    // swallowed by the catch below, leaving originalState null, so cleanup() took the
+    // "nothing to restore" path and the live snapshot stayed replaced by STUB_STATE.
+    try {
+      originalState = readFileSync(statePath, "utf8");
+    } catch (e) {
+      console.error(`FAIL could not back up ${statePath}: ${e.message}`);
+      console.error("FAIL refusing to run: overwriting a snapshot we cannot restore is data loss.");
+      process.exit(1);
+    }
   }
   const STUB_STATE = { generatedAt: new Date().toISOString(), kiloBin: null, version: null, agents: [], sessions: [], details: [], errors: [], trackedSessionCount: 0 };
   writeFileSync(statePath, JSON.stringify(STUB_STATE, null, 2), "utf8");
@@ -243,26 +258,48 @@ async function runSmoke() {
   let serverProc = null;
   let serverPort = null;
   let timedOut = false;
+  let currentCheck = "startup";
+  const ctx = {};
 
   const cleanup = async () => {
     if (serverProc && serverProc.pid) {
       try { serverProc.kill("SIGTERM"); } catch { /* already dead */ }
     }
-    // Restore original state.json
+    // Restore original state.json. This is unconditional whenever a file was there:
+    // a skipped restore here is silent data loss behind an otherwise passing run.
     try {
-      if (hadState && originalState !== null) {
-        writeFileSync(statePath, originalState, "utf8");
-      } else if (!hadState) {
+      if (hadState) {
+        if (originalState === null) {
+          restoreFailed = true;
+          console.error(`FAIL REFUSING to report success: could not restore ${statePath}`);
+        } else {
+          writeFileSync(statePath, originalState, "utf8");
+        }
+      } else {
         try { unlinkSync(statePath); } catch { /* ignore */ }
       }
-    } catch { /* best effort */ }
+    } catch (e) {
+      restoreFailed = true;
+      console.error(`FAIL failed to restore ${statePath}: ${e.message}`);
+    }
   };
 
-  // Timeout guard
+  // Startup guard: bounds only the wait for the READY line. This used to cover the
+  // whole suite, so a run whose server came up fine but whose checks took longer than
+  // 30s was killed mid-flight with no indication of which check had hung.
   const startupTimer = setTimeout(() => {
     timedOut = true;
+    console.error("FAIL server did not print a READY line within 30s");
     cleanup().finally(() => process.exit(1));
   }, 30000);
+
+  // Overall guard: a backstop only. Per-check timeouts below report the hung check by
+  // name, so reaching this one means several checks were slow rather than one being stuck.
+  const overallTimer = setTimeout(() => {
+    timedOut = true;
+    console.error(`FAIL smoke run exceeded 180s; check in flight: ${currentCheck}`);
+    cleanup().finally(() => process.exit(1));
+  }, 180000);
 
   try {
     serverProc = spawn(process.execPath, serverArgs, {
@@ -301,6 +338,10 @@ async function runSmoke() {
           serverProc.stdout.off("data", onData);
           const portMatch = readyLine.match(/:(\d+)$/);
           serverPort = portMatch ? parseInt(portMatch[1], 10) : null;
+          // Server is up: the startup guard has done its job, so stop it from
+          // counting down across the checks that follow.
+          clearTimeout(startupTimer);
+          currentCheck = "readiness";
           resolveReady();
         }
       };
@@ -356,33 +397,43 @@ async function runSmoke() {
       checkChatSessionCreate,
     ];
 
+    ctx.host = "127.0.0.1";
+    ctx.port = serverPort;
+
     for (const fn of checks) {
+      const label = fn.name.replace("check", "").replace(/([A-Z])/g, "/$1").toLowerCase();
+      currentCheck = label;
+      // First collect can take ~60s; give it a longer guard.
+      const guardMs = (label === "/collect" || label === "/chat/events") ? 130000 : 20000;
       try {
-        const msg = await fn({ host: "127.0.0.1", port: serverPort });
+        const msg = await withTimeout(label, fn(ctx), guardMs);
         console.log(msg);
         results.push(true);
       } catch (e) {
-        console.log(`FAIL ${fn.name.replace("check", "").replace(/([A-Z])/g, "/$1").toLowerCase()}: ${e.message}`);
+        console.log(`FAIL ${label}: ${e.message}`);
         results.push(false);
       }
     }
 
-    // Capture session id from the chat/session check (already run above),
-    // or try to create one if it was skipped or failed.
+    // Capture the session id from the chat/session check that just ran, or create one
+    // if that check was skipped or failed. This used to read the return value of
+    // checkChatSessionCreate as if the id were a string while the check asserts it is
+    // an object, so sessionId never got set and the events/send/abort checks below
+    // always short-circuited to SKIP.
     const sessionIdx = checks.indexOf(checkChatSessionCreate);
-    const sessionResult = results[sessionIdx];
 
-    if (!sessionId && sessionResult !== true) {
+    if (!sessionId) {
+      currentCheck = "/api/chat/session";
       try {
-        const { status, data } = await request({
+        const { status, data } = await withTimeout("/api/chat/session", request({
           host: "127.0.0.1",
           port: serverPort,
           path: "/api/chat/session",
           method: "POST",
           body: {},
-        });
-        if (data?.ok && typeof data.session === "string") {
-          sessionId = data.session;
+        }));
+        if (data?.ok && data.session && typeof data.session.id === "string") {
+          sessionId = data.session.id;
           console.log(`PASS /api/chat/session (created ${sessionId})`);
           if (sessionIdx >= 0 && !results[sessionIdx]) results[sessionIdx] = true;
         } else if (data?.ok === false && status === 400) {
@@ -399,24 +450,26 @@ async function runSmoke() {
 
     // Chat endpoint checks that need a session
     const chatChecks = [
-      () => checkChatEvents({ host: "127.0.0.1", port: serverPort, sessionId }),
-      () => checkChatSend({ host: "127.0.0.1", port: serverPort, sessionId }),
-      () => checkChatAbort({ host: "127.0.0.1", port: serverPort, sessionId }),
+      ["/api/chat/events", () => checkChatEvents({ host: "127.0.0.1", port: serverPort, sessionId })],
+      ["/api/chat/send", () => checkChatSend({ host: "127.0.0.1", port: serverPort, sessionId })],
+      ["/api/chat/abort", () => checkChatAbort({ host: "127.0.0.1", port: serverPort, sessionId })],
     ];
 
-    for (const fn of chatChecks) {
+    for (const [label, fn] of chatChecks) {
+      currentCheck = label;
       try {
-        const msg = await fn();
+        const msg = await withTimeout(label, fn());
         console.log(msg);
         results.push(true);
       } catch (e) {
-        console.log(`FAIL chat endpoint: ${e.message}`);
+        console.log(`FAIL ${label}: ${e.message}`);
         results.push(false);
       }
     }
 
   } finally {
     clearTimeout(startupTimer);
+    clearTimeout(overallTimer);
   }
 
   // ── Summary ────────────────────────────────────────────────────────────────
@@ -431,7 +484,9 @@ async function runSmoke() {
   await cleanup();
   if (serverProc) { try { serverProc.kill("SIGTERM"); } catch { /* ignore */ } }
 
-  process.exit(failed > 0 ? 1 : 0);
+  // A failed restore is a hard failure: the run may look clean while the live
+  // snapshot sits destroyed on disk, which is the exact failure this file had.
+  process.exit(failed > 0 || restoreFailed ? 1 : 0);
 }
 
 const startTime = Date.now();
