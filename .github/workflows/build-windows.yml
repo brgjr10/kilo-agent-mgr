@@ -38,11 +38,11 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@v4
 
       # Must match desktop/stage.mjs's default so the bundled node.exe is the
       # same LTS line the backend was written against.
-      - uses: actions/setup-node@60edb5dd545a775178f52524783378180af0d1f8 # v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "22.20.0"
 
@@ -50,7 +50,7 @@ jobs:
         run: rustup toolchain install stable --profile minimal
 
       - name: Cache cargo
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin
@@ -90,7 +90,7 @@ jobs:
           Get-Item $exe | Select-Object Name, Length
 
       - name: Upload
-        uses: actions/upload-artifact@a8a3f3ad30e3422c9c7b88791712f4c8e6a9c257 # v4
+        uses: actions/upload-artifact@v4
         with:
           name: AgentManager-windows-x64
           path: dist/AgentManager.exe
@@ -119,11 +119,11 @@ jobs:
       # --generate-notes compares against the previous tag, and it does that by
       # shelling out to git, so it needs a real repository. Full history, or
       # there is nothing for it to diff against.
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - uses: actions/download-artifact@95a83c33d4a165b2b9383e3656f8cef05342a95c # v4
+      - uses: actions/download-artifact@v4
         with:
           name: AgentManager-windows-x64
           path: dist
